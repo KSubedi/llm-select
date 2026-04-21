@@ -1,10 +1,11 @@
 const DEFAULT_SETTINGS = {
-  format: 'yaml',
+  format: 'xml',
   fields: {
     url: true,
     sel: true,
     tag: true,
     comp: true,
+    ancestors: true,
     src: true,
     fw: true,
     label: true,
@@ -14,23 +15,29 @@ const DEFAULT_SETTINGS = {
 };
 
 const FIELD_INFO = {
-  url:   { label: 'url',   desc: 'Page URL' },
-  sel:   { label: 'sel',   desc: 'CSS selector (validated)' },
-  tag:   { label: 'tag',   desc: 'HTML tag' },
-  comp:  { label: 'comp',  desc: 'Component name (React/Vue/etc)' },
-  src:   { label: 'src',   desc: 'Source file:line (dev builds)' },
-  fw:    { label: 'fw',    desc: 'Framework (if not React)' },
-  label: { label: 'label', desc: 'Associated label or heading' },
-  state: { label: 'state', desc: 'href, checked, disabled, etc' },
-  txt:   { label: 'txt',   desc: 'Element text content' },
+  url:       { label: 'url',       desc: 'Page URL + route' },
+  sel:       { label: 'sel',       desc: 'CSS selector (validated)' },
+  tag:       { label: 'tag',       desc: 'HTML tag + role' },
+  comp:      { label: 'comp',      desc: 'Component name (React/Vue/etc)' },
+  ancestors: { label: 'ancestors', desc: 'Parent component chain' },
+  src:       { label: 'src',       desc: 'Source file:line (dev builds)' },
+  fw:        { label: 'fw',        desc: 'Framework detected' },
+  label:     { label: 'label',     desc: 'Associated label or heading' },
+  state:     { label: 'state',     desc: 'href, checked, disabled, etc' },
+  txt:       { label: 'txt',       desc: 'Element text content' },
 };
 
 const SAMPLE_INFO = {
   url: 'https://myapp.com/dashboard',
+  route: '/dashboard',
   sel: 'nav>button[data-testid="submit"]',
   tag: 'button',
+  role: null,
   comp: 'SubmitButton',
+  ancestors: 'CheckoutForm > PaymentStep',
   src: 'src/components/SubmitButton.tsx:42',
+  srcFile: 'src/components/SubmitButton.tsx',
+  srcLine: 42,
   fw: 'react',
   label: 'near-heading: "Account"',
   state: 'type=button, disabled',
@@ -39,7 +46,7 @@ const SAMPLE_INFO = {
 
 function formatYaml(info, settings) {
   const lines = [];
-  const order = ['url', 'sel', 'tag', 'comp', 'src', 'fw', 'label', 'state', 'txt'];
+  const order = ['url', 'sel', 'tag', 'comp', 'ancestors', 'src', 'fw', 'label', 'state', 'txt'];
   for (const key of order) {
     if (info[key] == null) continue;
     if (settings.fields[key] === false) continue;
@@ -50,13 +57,17 @@ function formatYaml(info, settings) {
 
 function formatJson(info, settings) {
   const out = {};
-  const order = ['url', 'sel', 'tag', 'comp', 'src', 'fw', 'label', 'state', 'txt'];
+  const order = ['url', 'sel', 'tag', 'comp', 'ancestors', 'src', 'fw', 'label', 'state', 'txt'];
   for (const key of order) {
     if (info[key] == null) continue;
     if (settings.fields[key] === false) continue;
     out[key] = info[key];
   }
   return JSON.stringify(out, null, 2);
+}
+
+function formatXml(info, settings) {
+  return `<CodeReference>\n${formatYaml(info, settings)}\n</CodeReference>`;
 }
 
 function formatSentence(info, settings) {
@@ -79,7 +90,8 @@ function formatSentence(info, settings) {
 function format(info, settings) {
   if (settings.format === 'json') return formatJson(info, settings);
   if (settings.format === 'sentence') return formatSentence(info, settings);
-  return formatYaml(info, settings);
+  if (settings.format === 'yaml') return formatYaml(info, settings);
+  return formatXml(info, settings);
 }
 
 let currentSettings = { ...DEFAULT_SETTINGS };
@@ -92,11 +104,11 @@ function renderFields() {
     const wrapper = document.createElement('label');
     wrapper.className = 'field-toggle';
     wrapper.innerHTML = `
-      <div>
+      <div class="meta">
         <div class="field-name">${info.label}</div>
         <span class="field-desc">${info.desc}</span>
       </div>
-      <div>
+      <div style="position:relative;">
         <input type="checkbox" id="field-${key}" ${enabled ? 'checked' : ''}>
         <div class="switch"></div>
       </div>
@@ -111,8 +123,16 @@ function renderFields() {
   });
 }
 
+function estimateTokens(s) {
+  // Rough heuristic: ~4 chars/token for English+code
+  return Math.max(1, Math.round(s.length / 4));
+}
+
 function renderPreview() {
-  document.getElementById('preview').textContent = format(SAMPLE_INFO, currentSettings);
+  const out = format(SAMPLE_INFO, currentSettings);
+  document.getElementById('preview').textContent = out;
+  const tc = document.getElementById('tokenCount');
+  if (tc) tc.textContent = `~${estimateTokens(out)} tokens · ${out.length} chars`;
 }
 
 function setFormatRadio() {
@@ -152,6 +172,17 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   setFormatRadio();
   renderFields();
   renderPreview();
+});
+
+document.getElementById('copyBtn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const text = document.getElementById('preview').textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = orig; }, 1200);
+  } catch {}
 });
 
 chrome.storage.sync.get(['settings'], (data) => {

@@ -7,19 +7,17 @@
   // DEFAULT SETTINGS
   // ============================================================
   const DEFAULT_SETTINGS = {
-    format: 'yaml',          // 'yaml' | 'json' | 'sentence'
+    format: 'xml',           // 'xml' | 'yaml' | 'json' | 'sentence'
     fields: {
       url: true,
       sel: true,
       tag: true,
       comp: true,
+      ancestors: true,
       src: true,
       txt: true,
       label: true,
       state: true,
-      path: false,           // off by default — often redundant
-      nth: false,            // off by default — handled by selector
-      alt: false,            // off by default — handled by validated selector
     }
   };
 
@@ -114,13 +112,18 @@
     const seen = new Set();
     let name = null;
     let source = null;
+    let sourceFile = null;
+    let sourceLine = null;
+    const chain = [];
 
-    while (current && depth < 30) {
+    while (current && depth < 40) {
       if (seen.has(current)) break;
       seen.add(current);
 
-      if (!name) {
-        name = getFiberTypeName(current.type) || getFiberTypeName(current.elementType);
+      const typeName = getFiberTypeName(current.type) || getFiberTypeName(current.elementType);
+      if (typeName) {
+        if (!name) name = typeName;
+        if (chain[chain.length - 1] !== typeName) chain.push(typeName);
       }
 
       // _debugSource is present in dev builds with @babel/plugin-transform-react-jsx-source
@@ -128,24 +131,34 @@
         const ds = current._debugSource;
         const file = ds.fileName;
         if (file) {
-          // Keep only the useful path (after last /src/, /app/, or last 2 segments)
           const parts = file.split('/');
           const srcIdx = parts.lastIndexOf('src');
           const appIdx = parts.lastIndexOf('app');
           const cutoff = Math.max(srcIdx, appIdx);
           const shortPath = cutoff >= 0 ? parts.slice(cutoff).join('/') : parts.slice(-2).join('/');
+          sourceFile = shortPath;
+          sourceLine = ds.lineNumber;
           source = `${shortPath}:${ds.lineNumber}`;
         }
       }
-
-      if (name && source) break;
 
       // Walk up via debugOwner first (more semantically meaningful), then fiber return
       current = current._debugOwner || current.return;
       depth++;
     }
 
-    return name || source ? { framework: 'react', name, source } : null;
+    if (!name && !source) return null;
+
+    // Ancestors = named components above the immediate one, capped at 3
+    const ancestors = chain.slice(1, 4);
+    return {
+      framework: 'react',
+      name,
+      source,
+      sourceFile,
+      sourceLine,
+      ancestors: ancestors.length ? ancestors : null,
+    };
   }
 
   function getVueInfo(element) {
@@ -488,15 +501,22 @@
   function inspectElement(element) {
     const info = {
       url: window.location.href,
+      route: window.location.pathname + (window.location.hash || ''),
       sel: generateValidatedSelector(element),
       tag: element.nodeName.toLowerCase(),
     };
+
+    const role = element.getAttribute('role');
+    if (role) info.role = role;
 
     const compInfo = getComponentInfo(element);
     if (compInfo) {
       if (compInfo.name) info.comp = compInfo.name;
       if (compInfo.source) info.src = compInfo.source;
-      if (compInfo.framework && compInfo.framework !== 'react') info.fw = compInfo.framework;
+      if (compInfo.sourceFile) info.srcFile = compInfo.sourceFile;
+      if (compInfo.sourceLine) info.srcLine = compInfo.sourceLine;
+      if (compInfo.ancestors) info.ancestors = compInfo.ancestors.join(' > ');
+      if (compInfo.framework) info.fw = compInfo.framework;
     }
 
     const label = getSemanticLabel(element);
@@ -511,9 +531,13 @@
     return info;
   }
 
+  function formatXml(info) {
+    return `<CodeReference>\n${formatYaml(info)}\n</CodeReference>`;
+  }
+
   function formatYaml(info) {
     const lines = [];
-    const order = ['url', 'sel', 'tag', 'comp', 'src', 'fw', 'label', 'state', 'txt'];
+    const order = ['url', 'sel', 'tag', 'comp', 'ancestors', 'src', 'fw', 'label', 'state', 'txt'];
     for (const key of order) {
       if (info[key] == null) continue;
       if (settings.fields && settings.fields[key] === false) continue;
@@ -527,7 +551,7 @@
 
   function formatJson(info) {
     const out = {};
-    const order = ['url', 'sel', 'tag', 'comp', 'src', 'fw', 'label', 'state', 'txt'];
+    const order = ['url', 'sel', 'tag', 'comp', 'ancestors', 'src', 'fw', 'label', 'state', 'txt'];
     for (const key of order) {
       if (info[key] == null) continue;
       if (settings.fields && settings.fields[key] === false) continue;
@@ -555,7 +579,8 @@
   function formatForLLM(info) {
     if (settings.format === 'json') return formatJson(info);
     if (settings.format === 'sentence') return formatSentence(info);
-    return formatYaml(info);
+    if (settings.format === 'yaml') return formatYaml(info);
+    return formatXml(info);
   }
 
   // ============================================================

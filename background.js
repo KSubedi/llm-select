@@ -36,4 +36,19 @@ chrome.action.onClicked.addListener(async (tab) => {
   await toggleInspector(tab);
 });
 
+// Right-click on the extension icon → "Settings"
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: 'llm-inspector-settings',
+    title: 'Settings',
+    contexts: ['action'],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info) => {
+  if (info.menuItemId === 'llm-inspector-settings') {
+    chrome.runtime.openOptionsPage();
+  }
+});
+
 // _execute_action command triggers onClicked automatically, so no extra listener needed

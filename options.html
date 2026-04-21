@@ -4,107 +4,184 @@
   <meta charset="UTF-8">
   <title>LLM Element Inspector — Settings</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 32px;
-      max-width: 640px;
-      margin: 0 auto;
-      line-height: 1.5;
+    :root {
+      --bg: #0b0d12;
+      --bg-elev: #12151c;
+      --bg-elev-2: #181c26;
+      --border: #252b38;
+      --border-strong: #323849;
+      --text: #e7eaf1;
+      --text-dim: #9aa3b5;
+      --text-faint: #6b7487;
+      --accent: #7c9cff;
+      --accent-soft: #7c9cff22;
+      --accent-strong: #5b7cff;
+      --success: #4ade80;
+      --mono: ui-monospace, 'SF Mono', Menlo, 'JetBrains Mono', monospace;
     }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+      background:
+        radial-gradient(1200px 600px at -10% -20%, #1a2240 0%, transparent 60%),
+        radial-gradient(900px 500px at 110% 0%, #231a3a 0%, transparent 55%),
+        var(--bg);
+      background-attachment: fixed;
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 32px 80px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 8px;
+    }
+    .logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent) 0%, #a07cff 100%);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 4px 20px -4px var(--accent-soft);
+    }
+    .logo svg { width: 20px; height: 20px; color: #0b0d12; }
     h1 {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: 600;
-      margin-bottom: 4px;
+      letter-spacing: -0.01em;
     }
     .subtitle {
-      color: #94a3b8;
+      color: var(--text-dim);
       font-size: 13px;
-      margin-bottom: 32px;
+      margin-bottom: 36px;
+      margin-left: 50px;
     }
     .section {
-      background: #1e293b;
-      border-radius: 10px;
-      padding: 20px;
-      margin-bottom: 20px;
+      background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 32px -12px rgba(0,0,0,0.4);
+    }
+    .section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 4px;
     }
     .section-title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 600;
-      margin-bottom: 14px;
-      color: #f1f5f9;
+      letter-spacing: -0.005em;
+      color: var(--text);
+    }
+    .section-hint {
+      font-size: 11px;
+      color: var(--text-faint);
+      font-family: var(--mono);
     }
     .section-desc {
-      font-size: 12px;
-      color: #94a3b8;
-      margin-bottom: 14px;
+      font-size: 12.5px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
     }
-    .radio-group {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
+
+    /* Format segmented control */
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 4px;
     }
-    .radio-option {
-      flex: 1;
-      min-width: 140px;
-      position: relative;
-    }
-    .radio-option input {
+    .segmented .opt { position: relative; }
+    .segmented .opt input {
       position: absolute;
       opacity: 0;
+      pointer-events: none;
     }
-    .radio-option label {
+    .segmented .opt label {
       display: block;
-      padding: 10px 14px;
-      background: #0f172a;
-      border: 1px solid #334155;
-      border-radius: 6px;
-      cursor: pointer;
+      padding: 10px 8px;
+      border-radius: 7px;
       text-align: center;
-      font-size: 13px;
-      transition: all 0.1s;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s, transform 0.08s;
+      user-select: none;
     }
-    .radio-option input:checked + label {
-      border-color: #3b82f6;
-      background: #1e3a8a;
+    .segmented .opt label .sub {
+      display: block;
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--text-faint);
+      margin-top: 3px;
+      font-family: var(--mono);
+    }
+    .segmented .opt label:hover { color: var(--text); }
+    .segmented .opt input:checked + label {
+      background: linear-gradient(180deg, #2a3352 0%, #1e2743 100%);
       color: #fff;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 0 0 1px var(--accent-strong);
     }
-    .radio-option label:hover {
-      border-color: #475569;
-    }
+    .segmented .opt input:checked + label .sub { color: #c3cdf0; }
+
+    /* Field toggles */
     .fields {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      gap: 8px;
     }
+    @media (max-width: 560px) { .fields { grid-template-columns: 1fr; } }
     .field-toggle {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 14px;
-      background: #0f172a;
-      border: 1px solid #334155;
-      border-radius: 6px;
-      font-size: 13px;
+      gap: 12px;
+      padding: 11px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color 0.12s, background 0.12s;
     }
+    .field-toggle:hover { border-color: var(--border-strong); }
+    .field-toggle .meta { min-width: 0; }
     .field-toggle .field-name {
-      font-family: monospace;
-      color: #60a5fa;
+      font-family: var(--mono);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 500;
     }
     .field-toggle .field-desc {
       font-size: 11px;
-      color: #64748b;
+      color: var(--text-faint);
       display: block;
       margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .switch {
       position: relative;
-      width: 38px;
-      height: 22px;
-      background: #334155;
-      border-radius: 11px;
+      width: 34px;
+      height: 20px;
+      background: #2a3142;
+      border-radius: 999px;
       cursor: pointer;
       transition: background 0.15s;
       flex-shrink: 0;
@@ -112,102 +189,211 @@
     .switch::after {
       content: '';
       position: absolute;
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       border-radius: 50%;
       background: #fff;
       top: 3px;
       left: 3px;
-      transition: all 0.15s;
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
     }
     input[type="checkbox"] {
       position: absolute;
       opacity: 0;
+      pointer-events: none;
     }
     input[type="checkbox"]:checked + .switch {
-      background: #3b82f6;
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
     }
-    input[type="checkbox"]:checked + .switch::after {
-      left: 19px;
-    }
+    input[type="checkbox"]:checked + .switch::after { left: 17px; }
+
+    /* Preview */
     .preview {
-      background: #020617;
-      border: 1px solid #334155;
-      border-radius: 6px;
-      padding: 14px;
-      font-family: 'SF Mono', Menlo, monospace;
+      background: #05070c;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      font-family: var(--mono);
       font-size: 12px;
-      color: #cbd5e1;
+      color: #cfd6e8;
       white-space: pre-wrap;
-      word-break: break-all;
-      min-height: 80px;
+      word-break: break-word;
+      min-height: 120px;
+      line-height: 1.6;
+      position: relative;
     }
+    .preview::before {
+      content: '';
+      position: absolute;
+      top: 10px; left: 12px;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #ff5f56;
+      box-shadow: 16px 0 0 #ffbd2e, 32px 0 0 #27c93f;
+      opacity: 0.35;
+    }
+    .preview .body { margin-top: 18px; }
+    .copy-btn {
+      position: absolute;
+      top: 10px; right: 10px;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.12s;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--border-strong); }
+
+    /* Actions */
     .actions {
       display: flex;
-      gap: 10px;
-      margin-top: 20px;
+      align-items: center;
+      gap: 12px;
+      margin-top: 24px;
     }
-    button {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
+    button.btn {
+      padding: 9px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 12.5px;
       font-weight: 500;
       cursor: pointer;
       font-family: inherit;
+      background: var(--bg-elev);
+      color: var(--text-dim);
+      transition: all 0.12s;
     }
-    .btn-secondary {
-      background: #334155;
-      color: #e2e8f0;
+    button.btn:hover {
+      background: var(--bg-elev-2);
+      color: var(--text);
+      border-color: var(--border-strong);
     }
-    .btn-secondary:hover { background: #475569; }
     .status {
-      color: #4ade80;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--success);
       font-size: 12px;
-      margin-left: 12px;
       opacity: 0;
       transition: opacity 0.2s;
     }
     .status.show { opacity: 1; }
+    .status::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .footer {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--text-faint);
+      font-size: 11.5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer kbd {
+      display: inline-block;
+      padding: 2px 6px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--text-dim);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+    }
+    .footer a {
+      color: var(--text-dim);
+      text-decoration: none;
+      border-bottom: 1px dotted var(--border-strong);
+      transition: color 0.12s, border-color 0.12s;
+    }
+    .footer a:hover {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
   </style>
 </head>
 <body>
-  <h1>LLM Element Inspector</h1>
-  <div class="subtitle">Customize what gets copied to your clipboard.</div>
+  <div class="wrap">
+    <div class="header">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3h7v7H3z"/>
+          <path d="M14 3h7v7h-7z"/>
+          <path d="M14 14h7v7h-7z"/>
+          <path d="M3 14h7v7H3z"/>
+        </svg>
+      </div>
+      <h1>LLM Element Inspector</h1>
+    </div>
+    <div class="subtitle">Customize what gets copied to your clipboard.</div>
 
-  <div class="section">
-    <div class="section-title">Output Format</div>
-    <div class="section-desc">How the copied text is structured.</div>
-    <div class="radio-group">
-      <div class="radio-option">
-        <input type="radio" name="format" value="yaml" id="fmt-yaml">
-        <label for="fmt-yaml">YAML-ish<br><span style="font-size:10px;opacity:0.6">key: value</span></label>
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Output format</div>
+        <div class="section-hint">wrapper + body</div>
       </div>
-      <div class="radio-option">
-        <input type="radio" name="format" value="json" id="fmt-json">
-        <label for="fmt-json">JSON<br><span style="font-size:10px;opacity:0.6">structured</span></label>
-      </div>
-      <div class="radio-option">
-        <input type="radio" name="format" value="sentence" id="fmt-sentence">
-        <label for="fmt-sentence">Sentence<br><span style="font-size:10px;opacity:0.6">plain English</span></label>
+      <div class="section-desc">XML wraps a compact YAML body — best balance of LLM-readability and token cost.</div>
+      <div class="segmented">
+        <div class="opt">
+          <input type="radio" name="format" value="xml" id="fmt-xml">
+          <label for="fmt-xml">XML<span class="sub">recommended</span></label>
+        </div>
+        <div class="opt">
+          <input type="radio" name="format" value="yaml" id="fmt-yaml">
+          <label for="fmt-yaml">YAML<span class="sub">key: value</span></label>
+        </div>
+        <div class="opt">
+          <input type="radio" name="format" value="json" id="fmt-json">
+          <label for="fmt-json">JSON<span class="sub">structured</span></label>
+        </div>
+        <div class="opt">
+          <input type="radio" name="format" value="sentence" id="fmt-sentence">
+          <label for="fmt-sentence">Sentence<span class="sub">plain english</span></label>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div class="section">
-    <div class="section-title">Fields to include</div>
-    <div class="section-desc">Toggle off what you don't need. Less = fewer tokens.</div>
-    <div class="fields" id="fieldsContainer"></div>
-  </div>
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Fields</div>
+        <div class="section-hint">toggle to save tokens</div>
+      </div>
+      <div class="section-desc">Only enabled fields appear in the output. Empty values are always skipped.</div>
+      <div class="fields" id="fieldsContainer"></div>
+    </div>
 
-  <div class="section">
-    <div class="section-title">Preview</div>
-    <div class="preview" id="preview"></div>
-  </div>
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Live preview</div>
+        <div class="section-hint" id="tokenCount">—</div>
+      </div>
+      <div class="preview">
+        <button class="copy-btn" id="copyBtn">Copy</button>
+        <div class="body" id="preview"></div>
+      </div>
+    </div>
 
-  <div class="actions">
-    <button class="btn-secondary" id="resetBtn">Reset to defaults</button>
-    <span class="status" id="status">Saved</span>
+    <div class="actions">
+      <button class="btn" id="resetBtn">Reset to defaults</button>
+      <span class="status" id="status">Saved</span>
+    </div>
+
+    <div class="footer">
+      <div>Toggle inspector with <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd></div>
+      <div>by <a href="https://ksubedi.com" target="_blank" rel="noopener noreferrer">Kaushal Subedi</a> · v1.1</div>
+    </div>
   </div>
 
   <script src="options.js"></script>
