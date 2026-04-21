@@ -1,13 +1,25 @@
 async function toggleInspector(tab) {
   try {
-    // Check if content script is already loaded
+    // Check isolated-world content script
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => typeof window.__llmInspectorToggle === 'function'
     });
 
-    // If not loaded, inject content.js first
     if (!result) {
+      // Check main-world script separately (different world = different globals)
+      const [{ result: mainLoaded }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => !!window.__llmInspectorMainLoaded,
+      });
+      if (!mainLoaded) {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content-main.js'],
+          world: 'MAIN',
+        });
+      }
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: ['content.js']

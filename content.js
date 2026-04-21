@@ -2,7 +2,7 @@
   // Prevent double-injection
   if (window.__llmInspectorLoaded) return;
   window.__llmInspectorLoaded = true;
-  window.__llmInspectorVersion = '1.2.1-debug';
+  window.__llmInspectorVersion = '1.3.0-main-world';
 
   // ============================================================
   // DEFAULT SETTINGS
@@ -49,277 +49,29 @@
   let currentPreview = null;
 
   // ============================================================
-  // FRAMEWORK DETECTION (React, Vue, Svelte, Angular, Solid)
+  // FRAMEWORK DETECTION BRIDGE (main world → isolated world)
+  // Fiber/component data lives on DOM nodes as expando properties set
+  // by page scripts. From an isolated-world content script, those are
+  // invisible, so content-main.js (world: MAIN) does the extraction
+  // and stashes a JSON result on the element; we read it back here.
   // ============================================================
   const __compCache = new WeakMap();
-
-  function findReactKeys(element) {
-    if (!element || typeof element !== 'object') return [];
-    try {
-      return Object.keys(element).filter(k =>
-        k.startsWith('__react') ||
-        k.startsWith('_react') ||
-        k.includes('reactFiber') ||
-        k.includes('reactContainer')
-      );
-    } catch (e) { return []; }
-  }
-
-  function getFiberTypeName(type) {
-    if (!type || typeof type === 'string') return null;
-    if (type.displayName) return type.displayName;
-    if (type.name) return type.name;
-    if (type.render) {
-      return type.render.displayName || type.render.name || null;
-    }
-    return null;
-  }
-
-  function getFiberFromElement(element) {
-    // Find the nearest fiber attached to this or an ancestor element
-    let el = element;
-    let domDepth = 0;
-    while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < 25) {
-      const keys = findReactKeys(el);
-      // Prefer fiber keys, then root containers, then other react keys
-      const fiberKey = keys.find(k => k.startsWith('__reactFiber') || k.includes('reactFiber'));
-      if (fiberKey) {
-        const val = el[fiberKey];
-        if (val && typeof val === 'object') return val;
-      }
-      for (const key of keys) {
-        const val = el[key];
-        if (!val || typeof val !== 'object') continue;
-        if (val._internalRoot?.current) return val._internalRoot.current;
-        // Heuristic: anything that looks fiber-shaped
-        if (val.stateNode !== undefined || val.type !== undefined ||
-            val.return !== undefined || val.memoizedProps !== undefined) {
-          return val;
-        }
-      }
-      el = el.parentElement;
-      domDepth++;
-    }
-    // Try DevTools hook fallback
-    try {
-      const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-      if (hook?.renderers) {
-        for (const renderer of hook.renderers.values()) {
-          const fiber = renderer.findFiberByHostInstance?.(element);
-          if (fiber) return fiber;
-        }
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  // Framework/router plumbing we don't want to surface as the component or in ancestors
-  const WRAPPER_NAMES = new Set([
-    'HydratedRouter', 'ServerRouter', 'RouterProvider', 'BrowserRouter', 'MemoryRouter', 'HashRouter',
-    'Outlet', 'Route', 'Routes', 'Router',
-    'Await', 'ResolveAwait',
-    'Provider', 'Consumer', 'Context', 'ContextProvider',
-    'Suspense', 'SuspenseList', 'ErrorBoundary', 'Fragment', 'StrictMode', 'Profiler',
-    'QueryClientProvider', 'HydrationBoundary',
-    'ThemeProvider', 'HelmetProvider',
-    'Observer', 'AutoObserver',
-  ]);
-  const WRAPPER_PATTERNS = [
-    /^WithComponentProps\d*$/,       // React Router v7
-    /^_?withRouter$/i,
-    /^_c\d*$/,                        // react-refresh anonymous wrappers
-    /^\$\$.*$/,                       // internal sigils
-    /^Connect\(.+\)$/,                // react-redux
-    /^Observer\(.+\)$/,                // mobx
-    /^ForwardRef(\(.+\))?$/,
-    /^Memo(\(.+\))?$/,
-  ];
-  function isWrapperName(n) {
-    if (!n) return true;
-    if (WRAPPER_NAMES.has(n)) return true;
-    return WRAPPER_PATTERNS.some(r => r.test(n));
-  }
-
-  function getReactInfo(element) {
-    const fiber = getFiberFromElement(element);
-    if (!fiber) return null;
-
-    let current = fiber;
-    let depth = 0;
-    const seen = new Set();
-    let name = null;
-    let fallbackName = null;   // first named thing, even if it's a wrapper
-    let source = null;
-    let sourceFile = null;
-    let sourceLine = null;
-    const chain = [];
-
-    while (current && depth < 40) {
-      if (seen.has(current)) break;
-      seen.add(current);
-
-      const typeName = getFiberTypeName(current.type) || getFiberTypeName(current.elementType);
-      if (typeName) {
-        if (!fallbackName) fallbackName = typeName;
-        if (!name && !isWrapperName(typeName)) name = typeName;
-        if (!isWrapperName(typeName) && chain[chain.length - 1] !== typeName) {
-          chain.push(typeName);
-        }
-      }
-
-      // _debugSource is present in dev builds with @babel/plugin-transform-react-jsx-source
-      if (!source && current._debugSource) {
-        const ds = current._debugSource;
-        const file = ds.fileName;
-        if (file) {
-          const parts = file.split('/');
-          const srcIdx = parts.lastIndexOf('src');
-          const appIdx = parts.lastIndexOf('app');
-          const cutoff = Math.max(srcIdx, appIdx);
-          const shortPath = cutoff >= 0 ? parts.slice(cutoff).join('/') : parts.slice(-2).join('/');
-          sourceFile = shortPath;
-          sourceLine = ds.lineNumber;
-          source = `${shortPath}:${ds.lineNumber}`;
-        }
-      }
-
-      // Walk up via debugOwner first (more semantically meaningful), then fiber return
-      current = current._debugOwner || current.return;
-      depth++;
-    }
-
-    const finalName = name || fallbackName;
-    if (!finalName && !source) return null;
-
-    // Ancestors = named user components above the immediate one, capped at 3
-    const ancestors = chain.slice(1, 4);
-    return {
-      framework: 'react',
-      name: finalName,
-      source,
-      sourceFile,
-      sourceLine,
-      ancestors: ancestors.length ? ancestors : null,
-    };
-  }
-
-  function getVueInfo(element) {
-    // Vue 2: __vue__, Vue 3: __vueParentComponent
-    let el = element;
-    let depth = 0;
-    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
-      // Vue 3
-      if (el.__vueParentComponent) {
-        const comp = el.__vueParentComponent;
-        const name = comp.type?.name || comp.type?.__name || comp.type?.__file?.split('/').pop()?.replace(/\.\w+$/, '');
-        const file = comp.type?.__file;
-        if (name || file) {
-          return {
-            framework: 'vue',
-            name: name || null,
-            source: file ? shortenPath(file) : null
-          };
-        }
-      }
-      // Vue 2
-      if (el.__vue__) {
-        const vm = el.__vue__;
-        const name = vm.$options?.name || vm.$options?._componentTag;
-        const file = vm.$options?.__file;
-        if (name || file) {
-          return {
-            framework: 'vue',
-            name: name || null,
-            source: file ? shortenPath(file) : null
-          };
-        }
-      }
-      el = el.parentElement;
-      depth++;
-    }
-    return null;
-  }
-
-  function getSvelteInfo(element) {
-    // Svelte doesn't expose component names by default, but dev mode adds them
-    let el = element;
-    let depth = 0;
-    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
-      // Svelte stores component info in various places in dev mode
-      const keys = Object.keys(el).filter(k => k.startsWith('__svelte'));
-      for (const key of keys) {
-        const val = el[key];
-        if (val?.ctx || val?.$$) {
-          const name = val.constructor?.name;
-          if (name && name !== 'Object') {
-            return { framework: 'svelte', name, source: null };
-          }
-        }
-      }
-      el = el.parentElement;
-      depth++;
-    }
-    return null;
-  }
-
-  function getAngularInfo(element) {
-    // Check for Angular markers
-    if (!document.querySelector('[ng-version]')) return null;
-    const version = document.querySelector('[ng-version]')?.getAttribute('ng-version');
-    // Try to get component name via ng global in dev mode
-    let el = element;
-    let depth = 0;
-    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
-      try {
-        if (window.ng?.getComponent) {
-          const comp = window.ng.getComponent(el);
-          if (comp) {
-            const name = comp.constructor?.name;
-            if (name) return { framework: `angular${version ? ' ' + version : ''}`, name, source: null };
-          }
-        }
-      } catch (e) {}
-      el = el.parentElement;
-      depth++;
-    }
-    return null;
-  }
-
-  function getSolidInfo(element) {
-    // Solid.js stores dev info in _$owner
-    let el = element;
-    let depth = 0;
-    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
-      if (el._$owner) {
-        const owner = el._$owner;
-        const name = owner.componentName || owner.name;
-        if (name) return { framework: 'solid', name, source: null };
-      }
-      el = el.parentElement;
-      depth++;
-    }
-    return null;
-  }
-
-  function shortenPath(file) {
-    if (!file) return null;
-    const parts = file.split('/');
-    const srcIdx = parts.lastIndexOf('src');
-    const appIdx = parts.lastIndexOf('app');
-    const cutoff = Math.max(srcIdx, appIdx);
-    return cutoff >= 0 ? parts.slice(cutoff).join('/') : parts.slice(-2).join('/');
-  }
+  const PROBE_EVENT = '__llm-inspector-probe';
+  const RESULT_ATTR = 'data-__llm-inspector-result';
 
   function getComponentInfo(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
     if (__compCache.has(element)) return __compCache.get(element);
 
-    const info =
-      getReactInfo(element) ||
-      getVueInfo(element) ||
-      getSvelteInfo(element) ||
-      getAngularInfo(element) ||
-      getSolidInfo(element);
+    let info = null;
+    try {
+      element.dispatchEvent(new CustomEvent(PROBE_EVENT));
+      const raw = element.getAttribute(RESULT_ATTR);
+      if (raw) {
+        element.removeAttribute(RESULT_ATTR);
+        info = JSON.parse(raw);
+      }
+    } catch (e) {}
 
     __compCache.set(element, info);
     return info;
@@ -717,25 +469,12 @@
     e.stopPropagation();
     const info = inspectElement(e.target);
     if (window.__llmInspectorDebug) {
-      const fiber = getFiberFromElement(e.target);
-      // Raw view of what's on the clicked element itself
-      const rawKeys = Object.keys(e.target).filter(k => k.startsWith('__react') || k.startsWith('_react'));
-      const rawFiberKey = rawKeys.find(k => k.startsWith('__reactFiber') || k.includes('reactFiber'));
-      const rawFiber = rawFiberKey ? e.target[rawFiberKey] : null;
       console.log('[LLM Inspector] click debug', {
         version: window.__llmInspectorVersion,
+        mainWorldLoaded: !!document.documentElement.dataset.llmInspectorMainReady,
         element: e.target,
         info,
-        fiberFound: !!fiber,
-        fiberType: fiber?.type,
-        fiberHasDebugSource: !!fiber?._debugSource,
-        fiberHasDebugOwner: !!fiber?._debugOwner,
-        reactInfo: fiber ? getReactInfo(e.target) : null,
-        rawKeysOnElement: rawKeys,
-        rawFiberKey,
-        rawFiberIsObject: rawFiber && typeof rawFiber === 'object',
-        rawFiberStateNode: rawFiber?.stateNode === e.target ? 'self' : typeof rawFiber?.stateNode,
-        rawFiberHasType: rawFiber?.type !== undefined,
+        componentInfo: getComponentInfo(e.target),
       });
     }
     copyToClipboard(formatForLLM(info));
