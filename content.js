@@ -79,7 +79,7 @@
     // Find the nearest fiber attached to this or an ancestor element
     let el = element;
     let domDepth = 0;
-    while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < 10) {
+    while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < 25) {
       const keys = findReactKeys(el);
       for (const key of keys) {
         const val = el[key];
