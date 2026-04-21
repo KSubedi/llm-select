@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>LLM Element Inspector — Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 32px;
+      max-width: 640px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-bottom: 32px;
+    }
+    .section {
+      background: #1e293b;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      color: #f1f5f9;
+    }
+    .section-desc {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 14px;
+    }
+    .radio-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .radio-option {
+      flex: 1;
+      min-width: 140px;
+      position: relative;
+    }
+    .radio-option input {
+      position: absolute;
+      opacity: 0;
+    }
+    .radio-option label {
+      display: block;
+      padding: 10px 14px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: center;
+      font-size: 13px;
+      transition: all 0.1s;
+    }
+    .radio-option input:checked + label {
+      border-color: #3b82f6;
+      background: #1e3a8a;
+      color: #fff;
+    }
+    .radio-option label:hover {
+      border-color: #475569;
+    }
+    .fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .field-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .field-toggle .field-name {
+      font-family: monospace;
+      color: #60a5fa;
+    }
+    .field-toggle .field-desc {
+      font-size: 11px;
+      color: #64748b;
+      display: block;
+      margin-top: 2px;
+    }
+    .switch {
+      position: relative;
+      width: 38px;
+      height: 22px;
+      background: #334155;
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .switch::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      top: 3px;
+      left: 3px;
+      transition: all 0.15s;
+    }
+    input[type="checkbox"] {
+      position: absolute;
+      opacity: 0;
+    }
+    input[type="checkbox"]:checked + .switch {
+      background: #3b82f6;
+    }
+    input[type="checkbox"]:checked + .switch::after {
+      left: 19px;
+    }
+    .preview {
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 14px;
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 12px;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      word-break: break-all;
+      min-height: 80px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .btn-secondary:hover { background: #475569; }
+    .status {
+      color: #4ade80;
+      font-size: 12px;
+      margin-left: 12px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .status.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h1>LLM Element Inspector</h1>
+  <div class="subtitle">Customize what gets copied to your clipboard.</div>
+
+  <div class="section">
+    <div class="section-title">Output Format</div>
+    <div class="section-desc">How the copied text is structured.</div>
+    <div class="radio-group">
+      <div class="radio-option">
+        <input type="radio" name="format" value="yaml" id="fmt-yaml">
+        <label for="fmt-yaml">YAML-ish<br><span style="font-size:10px;opacity:0.6">key: value</span></label>
+      </div>
+      <div class="radio-option">
+        <input type="radio" name="format" value="json" id="fmt-json">
+        <label for="fmt-json">JSON<br><span style="font-size:10px;opacity:0.6">structured</span></label>
+      </div>
+      <div class="radio-option">
+        <input type="radio" name="format" value="sentence" id="fmt-sentence">
+        <label for="fmt-sentence">Sentence<br><span style="font-size:10px;opacity:0.6">plain English</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Fields to include</div>
+    <div class="section-desc">Toggle off what you don't need. Less = fewer tokens.</div>
+    <div class="fields" id="fieldsContainer"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Preview</div>
+    <div class="preview" id="preview"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-secondary" id="resetBtn">Reset to defaults</button>
+    <span class="status" id="status">Saved</span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

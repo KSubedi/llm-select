@@ -1,6 +1,6 @@
 # LLM Element Inspector
 
-A minimal Chrome extension that lets you inspect and copy DOM element references in a token-efficient format perfect for LLM prompts. It detects React component names, generates robust CSS selectors, and copies everything to your clipboard in one click.
+A minimal Chrome extension that lets you inspect and copy DOM element references in a format perfect for LLM prompts. It detects component names across React, Vue, Svelte, Angular, and Solid, finds source file locations in dev builds, generates validated CSS selectors, and copies everything to your clipboard in one click.
 
 ## Why this exists
 
@@ -9,25 +9,28 @@ The goal is to help you quickly point things out to your coding agent. Instead o
 For example, you select a button and tell your agent:
 
 > "Make this button blue"  
-> `url:https://myapp.com/dashboard`  
-> `sel:#submit-btn`  
-> `alt:button.btn-primary`  
-> `tag:button`  
-> `path:header > nav`  
-> `nth:2/3`  
-> `comp:SubmitButton`  
-> `txt:"Create account"`
+> `url: https://myapp.com/dashboard`  
+> `sel: nav>button[data-testid="submit"]`  
+> `tag: button`  
+> `comp: SubmitButton`  
+> `src: src/components/SubmitButton.tsx:42`  
+> `label: near-heading: "Create account"`  
+> `state: type=button, disabled`  
+> `txt: Create account`
 
-The agent now knows exactly which element you're talking about, even in a large React codebase.
+The agent now has everything it needs — exact file path, line number, component name, selector, state, and the text. It can jump straight to the right file and make the change.
 
 ## Features
 
-- **One-click element inspection** - Click the extension icon or press a keyboard shortcut to enter selection mode
-- **Token-efficient output** - Copies only what an LLM needs: URL, CSS selector, tag, text content
-- **React component detection** - Automatically detects and includes React component names from fiber trees
-- **Smart CSS selectors** - Prioritizes stable locators (`data-testid`, `aria-label`, IDs) over brittle classes
-- **Configurable keyboard shortcut** - Default is `Alt+Shift+X`, customizable in Chrome
-- **No popup dialogs** - Instant toggle, minimal friction
+- **One-click element inspection** — Click the extension icon or press a keyboard shortcut to enter selection mode
+- **Multi-framework component detection** — React, Vue 2/3, Svelte, Angular, Solid
+- **Source file detection** — In dev builds, gets the exact `file:line` from React fiber debug data
+- **Validated CSS selectors** — Every selector is tested with `querySelectorAll` to verify it uniquely matches the target element
+- **Smart context** — Finds associated `<label>`, nearby headings, `aria-label`, placeholders
+- **Element state** — Captures `href`, `disabled`, `checked`, `aria-expanded`, input type/value, and more
+- **Configurable** — Settings page to toggle fields and choose output format (YAML / JSON / plain English)
+- **Keyboard shortcut** — Default is `Alt+Shift+X`, customizable in Chrome
+- **No popup dialogs** — Instant toggle, minimal friction
 
 ## Installation
 
@@ -55,35 +58,95 @@ The agent now knows exactly which element you're talking about, even in a large 
 
 4. **Paste** into your LLM prompt
 
-### Example Output
+### Configuration
 
-```
-url:https://github.com/octocat/Hello-World
-sel:#submit-btn
-alt:button.btn-primary
-tag:button
-path:header > nav > ul
-nth:2/5
-comp:SubmitButton
-txt:"Create pull request"
-```
+Right-click the extension icon → **Options** (or visit `chrome://extensions/` and click Details → Extension options).
 
-**Fields explained:**
-
-| Key | Meaning | Why it helps the LLM |
-|---|---|---|
-| `url` | **URL** | Knows which page |
-| `sel` | **Best selector** | Most robust unique locator (e.g. `data-testid`, ID, class path) |
-| `alt` | **Alt selector** | Simple fallback without ancestry (e.g. `button.btn-primary`) |
-| `tag` | **Tag** | Knows it's a `<button>` vs `<a>` vs `<div>` |
-| `path` | **Parent path** | Semantic breadcrumbs: `header > nav > ul` gives structural context |
-| `nth` | **Sibling index** | "2nd button of 5" — disambiguates when multiple similar elements exist |
-| `comp` | **React component** | Jumps straight to the source file: `SubmitButton.jsx` |
-| `txt` | **Text content** | Semantic label the LLM can grep for |
+You can customize:
+- **Output format:** YAML-ish (default), JSON, or plain English sentence
+- **Which fields to include:** toggle each field on/off to minimize token usage
 
 ### Cancel Selection
 
 Press `Escape` or click the extension icon again to exit selection mode.
+
+## Output Format
+
+Default YAML-ish output:
+
+```
+url: https://github.com/octocat/Hello-World
+sel: nav>button[data-testid="submit"]
+tag: button
+comp: SubmitButton
+src: src/components/SubmitButton.tsx:42
+label: near-heading: "Account"
+state: type=button, disabled
+txt: Create pull request
+```
+
+### Fields
+
+| Key | Meaning | Why it helps the LLM |
+|---|---|---|
+| `url` | Page URL | Knows which page |
+| `sel` | **Validated** CSS selector | Guaranteed to uniquely match the target element |
+| `tag` | HTML tag | Knows it's a `<button>` vs `<a>` vs `<div>` |
+| `comp` | Component name | Points to React/Vue/Svelte/etc. component |
+| `src` | Source file + line | Jumps straight to the right file (dev builds only) |
+| `fw` | Framework | Which framework was detected (if not React) |
+| `label` | Associated label / nearby heading | Gives semantic context ("this is the email field", "in the Account section") |
+| `state` | Element state | `href`, `disabled`, `checked`, `type`, `aria-*` — tells LLM what the element does |
+| `txt` | Text content | Semantic label the LLM can grep for |
+
+Only non-empty fields are included. Toggle any field off in settings to save tokens.
+
+## How It Works
+
+### Validated CSS Selector
+Rather than generating a selector and hoping it works, the extension:
+1. Tries stable attributes first: `data-testid`, `data-test`, `data-cy`, `data-qa`, `aria-label`, `name`
+2. Tries the element ID
+3. Builds a selector bottom-up, using classes and `nth-of-type` for disambiguation
+4. At each step, runs `querySelectorAll(selector)` and stops when it uniquely matches the target
+5. Skips Tailwind-style utility classes (`bg-`, `p-`, `flex`, etc.) that change often
+
+**This means `sel` is guaranteed to work.** No broken selectors.
+
+### Component Detection
+Detects components across:
+- **React** — reads fiber tree via `__reactFiber$...` properties; falls back to React DevTools hook
+- **Vue 2** — reads `__vue__.$options.name`
+- **Vue 3** — reads `__vueParentComponent.type.__name` and `__file`
+- **Svelte** — reads dev-mode `__svelte*` keys
+- **Angular** — uses `window.ng.getComponent()` when available
+- **Solid** — reads `_$owner.componentName`
+
+For React forwardRef/memo/lazy wrappers, unwraps them to find the real name.
+
+### Source File Detection (React)
+In development builds, React's JSX transform adds `_debugSource` with `fileName` and `lineNumber` to every fiber. The extension extracts this and shortens the path to something readable like `src/components/SubmitButton.tsx:42`.
+
+This works when Babel's `@babel/plugin-transform-react-jsx-source` is active (default in `create-react-app`, Next.js dev, Vite React, etc.). It does not work in production builds.
+
+### Semantic Label Detection
+For form elements, finds the associated `<label>` via:
+1. `aria-label` attribute
+2. `aria-labelledby` referencing another element
+3. `<label for="id">`
+4. Wrapping `<label>`
+5. `placeholder` attribute
+
+For other elements, finds the nearest preceding heading for structural context.
+
+### Element State Capture
+Depending on element type, includes:
+- Links: `href`
+- Images: `alt`
+- Inputs: `type`, `value`, `disabled`, `required`, `checked`
+- Buttons: `disabled`
+- Selects: number of options
+- Any element: `aria-expanded`, `aria-checked`, `aria-selected`
 
 ## Project Structure
 
@@ -91,47 +154,14 @@ Press `Escape` or click the extension icon again to exit selection mode.
 llm-copy/
 ├── manifest.json       # Extension manifest (Manifest V3)
 ├── background.js       # Service worker: handles icon click & keyboard shortcuts
-├── content.js          # Content script: DOM inspection, React detection, selection logic
+├── content.js          # Content script: DOM inspection, framework detection, selection logic
 ├── content.css         # Styles for highlight overlays
+├── options.html        # Settings page UI
+├── options.js          # Settings page logic
 ├── icons/              # Extension icons (16px, 48px, 128px)
 ├── LICENSE             # Apache 2.0 license
 └── README.md           # This file
 ```
-
-## How It Works
-
-### CSS Selector Generation
-The extension builds **two selectors** for redundancy:
-
-**Primary (`s`)** — most robust unique locator, built from the element up:
-1. `data-testid`, `data-test`, `aria-label`, `role` attributes
-2. Element ID
-3. Stable class names (filters out Tailwind-style utility classes)
-4. `nth-of-type` index for disambiguation
-5. Caps depth at 4 levels
-
-**Alternative (`a`)** — simple fallback without ancestry:
-- Just the tag + key attributes or classes, so it still works if the page structure changes
-
-### Semantic Parent Path (`p`)
-Walks up the DOM collecting meaningful landmarks:
-- HTML5 semantic tags: `<header>`, `<nav>`, `<main>`, `<aside>`, `<footer>`, `<section>`, `<article>`
-- ARIA roles
-- Element IDs and `aria-label` attributes
-
-This gives the LLM human-readable context like `header > nav > user-menu`.
-
-### Sibling Index (`n`)
-Computes the element's position among same-tag siblings: `2/5` means "2nd button of 5 in this container." This disambiguates lists, toolbars, and grids where multiple similar elements exist.
-
-### React Detection
-React stores internal "fiber" data on DOM elements. The extension:
-1. Scans elements for React fiber properties (`__reactFiber$...`)
-2. Traverses up the fiber tree to find the nearest named component
-3. Falls back to React DevTools hook if installed
-4. Includes the component name in both hover preview and copied output
-
-This works with function components, class components, forwardRef, and memo wrappers.
 
 ## Browser Support
 

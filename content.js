@@ -3,306 +3,566 @@
   if (window.__llmInspectorLoaded) return;
   window.__llmInspectorLoaded = true;
 
+  // ============================================================
+  // DEFAULT SETTINGS
+  // ============================================================
+  const DEFAULT_SETTINGS = {
+    format: 'yaml',          // 'yaml' | 'json' | 'sentence'
+    fields: {
+      url: true,
+      sel: true,
+      tag: true,
+      comp: true,
+      src: true,
+      txt: true,
+      label: true,
+      state: true,
+      path: false,           // off by default — often redundant
+      nth: false,            // off by default — handled by selector
+      alt: false,            // off by default — handled by validated selector
+    }
+  };
+
+  let settings = { ...DEFAULT_SETTINGS };
+  if (chrome?.storage?.sync) {
+    chrome.storage.sync.get(['settings'], (data) => {
+      if (data.settings) {
+        settings = {
+          ...DEFAULT_SETTINGS,
+          ...data.settings,
+          fields: { ...DEFAULT_SETTINGS.fields, ...(data.settings.fields || {}) }
+        };
+      }
+    });
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.settings) {
+        const ns = changes.settings.newValue;
+        settings = {
+          ...DEFAULT_SETTINGS,
+          ...ns,
+          fields: { ...DEFAULT_SETTINGS.fields, ...(ns?.fields || {}) }
+        };
+      }
+    });
+  }
+
   let currentHighlight = null;
   let currentPreview = null;
 
-  // --- React component detection ---
-  const __reactCache = new WeakMap();
+  // ============================================================
+  // FRAMEWORK DETECTION (React, Vue, Svelte, Angular, Solid)
+  // ============================================================
+  const __compCache = new WeakMap();
 
   function findReactKeys(element) {
     if (!element || typeof element !== 'object') return [];
     try {
-      const keys = Object.keys(element);
-      return keys.filter(k =>
+      return Object.keys(element).filter(k =>
         k.startsWith('__react') ||
-        k.startsWith('__reactInternal') ||
         k.startsWith('_react') ||
         k.includes('reactFiber') ||
         k.includes('reactContainer')
       );
-    } catch (e) {
-      return [];
-    }
+    } catch (e) { return []; }
   }
 
   function getFiberTypeName(type) {
-    if (!type) return null;
-    if (typeof type === 'string') return null;
-    if (type.name) return type.name;
+    if (!type || typeof type === 'string') return null;
     if (type.displayName) return type.displayName;
+    if (type.name) return type.name;
     if (type.render) {
-      if (type.render.name) return type.render.name;
-      if (type.render.displayName) return type.render.displayName;
+      return type.render.displayName || type.render.name || null;
     }
     return null;
   }
 
-  function walkFiber(fiber, maxDepth = 30) {
-    let current = fiber;
-    let depth = 0;
-    const seen = new Set();
-
-    while (current && depth < maxDepth) {
-      if (seen.has(current)) break;
-      seen.add(current);
-
-      let name = getFiberTypeName(current.type);
-      if (name) return name;
-
-      name = getFiberTypeName(current.elementType);
-      if (name) return name;
-
-      if (current._debugOwner) {
-        name = walkFiber(current._debugOwner, maxDepth - depth);
-        if (name) return name;
-      }
-
-      current = current.return;
-      depth++;
-    }
-    return null;
-  }
-
-  function getReactComponentName(element) {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
-    if (__reactCache.has(element)) return __reactCache.get(element);
-
+  function getFiberFromElement(element) {
+    // Find the nearest fiber attached to this or an ancestor element
     let el = element;
     let domDepth = 0;
-    const maxDomDepth = 10;
-
-    while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < maxDomDepth) {
-      const reactKeys = findReactKeys(el);
-      for (const key of reactKeys) {
+    while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < 10) {
+      const keys = findReactKeys(el);
+      for (const key of keys) {
         const val = el[key];
         if (!val) continue;
-
-        if (typeof val === 'object' && val !== null) {
-          const name = walkFiber(val);
-          if (name) {
-            __reactCache.set(element, name);
-            return name;
-          }
-        }
-
-        if (val._internalRoot && val._internalRoot.current) {
-          const name = walkFiber(val._internalRoot.current);
-          if (name) {
-            __reactCache.set(element, name);
-            return name;
-          }
-        }
+        if (typeof val === 'object' && val.stateNode !== undefined) return val;
+        if (typeof val === 'object' && val.type !== undefined) return val;
+        if (val._internalRoot?.current) return val._internalRoot.current;
       }
       el = el.parentElement;
       domDepth++;
     }
-
+    // Try DevTools hook fallback
     try {
       const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-      if (hook && hook.renderers) {
+      if (hook?.renderers) {
         for (const renderer of hook.renderers.values()) {
-          if (renderer.findFiberByHostInstance) {
-            const fiber = renderer.findFiberByHostInstance(element);
-            if (fiber) {
-              const name = walkFiber(fiber);
-              if (name) {
-                __reactCache.set(element, name);
-                return name;
-              }
-            }
-          }
+          const fiber = renderer.findFiberByHostInstance?.(element);
+          if (fiber) return fiber;
         }
       }
     } catch (e) {}
-
-    __reactCache.set(element, null);
     return null;
   }
 
-  // --- Semantic helpers ---
-  const LANDMARKS = new Set(['header', 'nav', 'main', 'aside', 'footer', 'section', 'article']);
+  function getReactInfo(element) {
+    const fiber = getFiberFromElement(element);
+    if (!fiber) return null;
 
-  function getLandmarkName(element) {
-    const tag = element.nodeName.toLowerCase();
-    if (LANDMARKS.has(tag)) return tag;
-    const role = element.getAttribute('role');
-    if (role) return role;
-    return null;
-  }
-
-  function getSemanticLabel(element) {
-    // Best human-readable label for an element
-    if (element.id) return `#${element.id}`;
-    const aria = element.getAttribute('aria-label');
-    if (aria) return aria;
-    const landmark = getLandmarkName(element);
-    if (landmark) return `<${landmark}>`;
-    const dataTest = element.getAttribute('data-testid') || element.getAttribute('data-test');
-    if (dataTest) return `[testid=${dataTest}]`;
-    return null;
-  }
-
-  function getParentPath(element, maxDepth = 4) {
-    const crumbs = [];
-    let current = element.parentElement;
+    let current = fiber;
     let depth = 0;
+    const seen = new Set();
+    let name = null;
+    let source = null;
 
-    while (current && current.nodeType === Node.ELEMENT_NODE && depth < maxDepth) {
-      const label = getSemanticLabel(current);
-      if (label) crumbs.unshift(label);
-      current = current.parentElement;
+    while (current && depth < 30) {
+      if (seen.has(current)) break;
+      seen.add(current);
+
+      if (!name) {
+        name = getFiberTypeName(current.type) || getFiberTypeName(current.elementType);
+      }
+
+      // _debugSource is present in dev builds with @babel/plugin-transform-react-jsx-source
+      if (!source && current._debugSource) {
+        const ds = current._debugSource;
+        const file = ds.fileName;
+        if (file) {
+          // Keep only the useful path (after last /src/, /app/, or last 2 segments)
+          const parts = file.split('/');
+          const srcIdx = parts.lastIndexOf('src');
+          const appIdx = parts.lastIndexOf('app');
+          const cutoff = Math.max(srcIdx, appIdx);
+          const shortPath = cutoff >= 0 ? parts.slice(cutoff).join('/') : parts.slice(-2).join('/');
+          source = `${shortPath}:${ds.lineNumber}`;
+        }
+      }
+
+      if (name && source) break;
+
+      // Walk up via debugOwner first (more semantically meaningful), then fiber return
+      current = current._debugOwner || current.return;
       depth++;
     }
 
-    return crumbs.join(' > ');
+    return name || source ? { framework: 'react', name, source } : null;
   }
 
-  function getSiblingIndex(element) {
-    if (!element.parentElement) return null;
-    const siblings = Array.from(element.parentElement.children).filter(s => s.nodeName === element.nodeName);
-    if (siblings.length <= 1) return null;
-    const idx = siblings.indexOf(element) + 1;
-    return `${idx}/${siblings.length}`;
+  function getVueInfo(element) {
+    // Vue 2: __vue__, Vue 3: __vueParentComponent
+    let el = element;
+    let depth = 0;
+    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
+      // Vue 3
+      if (el.__vueParentComponent) {
+        const comp = el.__vueParentComponent;
+        const name = comp.type?.name || comp.type?.__name || comp.type?.__file?.split('/').pop()?.replace(/\.\w+$/, '');
+        const file = comp.type?.__file;
+        if (name || file) {
+          return {
+            framework: 'vue',
+            name: name || null,
+            source: file ? shortenPath(file) : null
+          };
+        }
+      }
+      // Vue 2
+      if (el.__vue__) {
+        const vm = el.__vue__;
+        const name = vm.$options?.name || vm.$options?._componentTag;
+        const file = vm.$options?.__file;
+        if (name || file) {
+          return {
+            framework: 'vue',
+            name: name || null,
+            source: file ? shortenPath(file) : null
+          };
+        }
+      }
+      el = el.parentElement;
+      depth++;
+    }
+    return null;
   }
 
-  function generateSimpleSelector(element) {
-    // A simple fallback selector without ancestry
-    const tag = element.nodeName.toLowerCase();
-    if (element.id) return `#${CSS.escape(element.id)}`;
-
-    const strongAttrs = ['data-testid', 'data-test', 'aria-label', 'name'];
-    for (const attr of strongAttrs) {
-      const val = element.getAttribute(attr);
-      if (val) return `${tag}[${attr}="${CSS.escape(val)}"]`;
-    }
-
-    if (element.className && typeof element.className === 'string') {
-      const classes = element.className.trim().split(/\s+/).filter(c => c && !isUtilityClass(c));
-      if (classes.length > 0) {
-        return `${tag}.${classes.map(c => CSS.escape(c)).join('.')}`;
-      }
-    }
-
-    const siblings = Array.from(element.parentElement?.children || []).filter(s => s.nodeName === element.nodeName);
-    if (siblings.length > 1) {
-      const idx = siblings.indexOf(element) + 1;
-      return `${tag}:nth-of-type(${idx})`;
-    }
-
-    return tag;
-  }
-
-  // Generate a short, robust CSS selector
-  function generateCssSelector(element) {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE) return '';
-
-    const strongAttrs = ['data-testid', 'data-test', 'aria-label', 'aria-labelledby', 'role'];
-    for (const attr of strongAttrs) {
-      const val = element.getAttribute(attr);
-      if (val) {
-        const tag = element.nodeName.toLowerCase();
-        return `${tag}[${attr}="${CSS.escape(val)}"]`;
-      }
-    }
-
-    if (element.id) {
-      return `#${CSS.escape(element.id)}`;
-    }
-
-    const parts = [];
-    let current = element;
-
-    while (current && current.nodeType === Node.ELEMENT_NODE) {
-      const tag = current.nodeName.toLowerCase();
-
-      if (current.id) {
-        parts.unshift(`#${CSS.escape(current.id)}`);
-        break;
-      }
-
-      let selector = tag;
-      if (current.className && typeof current.className === 'string') {
-        const classes = current.className.trim().split(/\s+/).filter(c => c && !isUtilityClass(c));
-        if (classes.length > 0) {
-          const firstClass = classes[0];
-          const siblings = Array.from(current.parentNode?.children || []);
-          const sameClass = siblings.filter(s => s.classList.contains(firstClass));
-          if (sameClass.length === 1) {
-            selector = `${tag}.${CSS.escape(firstClass)}`;
-          } else {
-            const idx = sameClass.indexOf(current) + 1;
-            selector = `${tag}.${CSS.escape(firstClass)}:nth-of-type(${idx})`;
+  function getSvelteInfo(element) {
+    // Svelte doesn't expose component names by default, but dev mode adds them
+    let el = element;
+    let depth = 0;
+    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
+      // Svelte stores component info in various places in dev mode
+      const keys = Object.keys(el).filter(k => k.startsWith('__svelte'));
+      for (const key of keys) {
+        const val = el[key];
+        if (val?.ctx || val?.$$) {
+          const name = val.constructor?.name;
+          if (name && name !== 'Object') {
+            return { framework: 'svelte', name, source: null };
           }
         }
       }
-
-      if (selector === tag && current.parentNode) {
-        const siblings = Array.from(current.parentNode.children).filter(s => s.nodeName === current.nodeName);
-        if (siblings.length > 1) {
-          const idx = siblings.indexOf(current) + 1;
-          selector = `${tag}:nth-of-type(${idx})`;
-        }
-      }
-
-      parts.unshift(selector);
-      current = current.parentNode;
-
-      if (parts.length >= 4) break;
-      if (!current || current.nodeType !== Node.ELEMENT_NODE) break;
+      el = el.parentElement;
+      depth++;
     }
-
-    return parts.join('>');
+    return null;
   }
 
+  function getAngularInfo(element) {
+    // Check for Angular markers
+    if (!document.querySelector('[ng-version]')) return null;
+    const version = document.querySelector('[ng-version]')?.getAttribute('ng-version');
+    // Try to get component name via ng global in dev mode
+    let el = element;
+    let depth = 0;
+    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
+      try {
+        if (window.ng?.getComponent) {
+          const comp = window.ng.getComponent(el);
+          if (comp) {
+            const name = comp.constructor?.name;
+            if (name) return { framework: `angular${version ? ' ' + version : ''}`, name, source: null };
+          }
+        }
+      } catch (e) {}
+      el = el.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
+  function getSolidInfo(element) {
+    // Solid.js stores dev info in _$owner
+    let el = element;
+    let depth = 0;
+    while (el && el.nodeType === Node.ELEMENT_NODE && depth < 10) {
+      if (el._$owner) {
+        const owner = el._$owner;
+        const name = owner.componentName || owner.name;
+        if (name) return { framework: 'solid', name, source: null };
+      }
+      el = el.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
+  function shortenPath(file) {
+    if (!file) return null;
+    const parts = file.split('/');
+    const srcIdx = parts.lastIndexOf('src');
+    const appIdx = parts.lastIndexOf('app');
+    const cutoff = Math.max(srcIdx, appIdx);
+    return cutoff >= 0 ? parts.slice(cutoff).join('/') : parts.slice(-2).join('/');
+  }
+
+  function getComponentInfo(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+    if (__compCache.has(element)) return __compCache.get(element);
+
+    const info =
+      getReactInfo(element) ||
+      getVueInfo(element) ||
+      getSvelteInfo(element) ||
+      getAngularInfo(element) ||
+      getSolidInfo(element);
+
+    __compCache.set(element, info);
+    return info;
+  }
+
+  // ============================================================
+  // SELECTOR GENERATION (with validation)
+  // ============================================================
   function isUtilityClass(c) {
     const prefixes = ['bg-', 'text-', 'p-', 'm-', 'px-', 'py-', 'mx-', 'my-', 'w-', 'h-', 'flex', 'grid', 'block', 'inline', 'hidden', 'visible', 'rounded', 'border', 'shadow', 'hover:', 'focus:', 'active:', 'sm:', 'md:', 'lg:', 'xl:'];
     return prefixes.some(p => c.startsWith(p));
   }
 
+  function selectorMatchesUniquely(selector, element) {
+    try {
+      const matches = document.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === element;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function selectorMatchesElement(selector, element) {
+    try {
+      const matches = document.querySelectorAll(selector);
+      return Array.from(matches).includes(element);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getStableAttrSelector(element) {
+    const tag = element.nodeName.toLowerCase();
+    const attrs = ['data-testid', 'data-test', 'data-cy', 'data-qa', 'aria-label', 'name'];
+    for (const attr of attrs) {
+      const val = element.getAttribute(attr);
+      if (val) {
+        const sel = `${tag}[${attr}="${CSS.escape(val)}"]`;
+        if (selectorMatchesUniquely(sel, element)) return sel;
+      }
+    }
+    return null;
+  }
+
+  function getStableClasses(element) {
+    if (!element.className || typeof element.className !== 'string') return [];
+    return element.className.trim().split(/\s+/).filter(c => c && !isUtilityClass(c));
+  }
+
+  // Build a selector and validate it matches only the target element
+  function generateValidatedSelector(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return '';
+
+    // 1. Stable attrs (testid, aria-label, name)
+    const attrSel = getStableAttrSelector(element);
+    if (attrSel) return attrSel;
+
+    // 2. ID (if unique)
+    if (element.id) {
+      const sel = `#${CSS.escape(element.id)}`;
+      if (selectorMatchesUniquely(sel, element)) return sel;
+    }
+
+    // 3. Build bottom-up, validate at each step
+    const parts = [];
+    let current = element;
+    let maxDepth = 6;
+
+    while (current && current.nodeType === Node.ELEMENT_NODE && maxDepth > 0) {
+      const tag = current.nodeName.toLowerCase();
+      let part = tag;
+
+      // Add ID if present
+      if (current.id) {
+        part = `#${CSS.escape(current.id)}`;
+      } else {
+        // Try stable attrs
+        const attr = current.getAttribute('data-testid') || current.getAttribute('data-test');
+        if (attr) {
+          part = `${tag}[data-testid="${CSS.escape(attr)}"]`;
+        } else {
+          const classes = getStableClasses(current);
+          if (classes.length > 0) {
+            part = `${tag}.${classes.slice(0, 2).map(c => CSS.escape(c)).join('.')}`;
+          }
+
+          // Add nth-of-type if still ambiguous among siblings
+          if (current.parentElement) {
+            const siblings = Array.from(current.parentElement.children);
+            const sameTagSiblings = siblings.filter(s => s.nodeName === current.nodeName);
+            if (sameTagSiblings.length > 1) {
+              // Check if current `part` is unique among siblings
+              const matchingSiblings = siblings.filter(s => {
+                try { return s.matches(part); } catch (e) { return false; }
+              });
+              if (matchingSiblings.length > 1) {
+                const idx = sameTagSiblings.indexOf(current) + 1;
+                part = `${part}:nth-of-type(${idx})`;
+              }
+            }
+          }
+        }
+      }
+
+      parts.unshift(part);
+
+      // Check if the selector is now unique
+      const candidate = parts.join('>');
+      if (selectorMatchesUniquely(candidate, element)) {
+        return candidate;
+      }
+
+      // Stop if we hit an ID (nothing above will help)
+      if (part.startsWith('#')) break;
+
+      current = current.parentElement;
+      maxDepth--;
+    }
+
+    const final = parts.join('>');
+    return selectorMatchesElement(final, element) ? final : '';
+  }
+
+  // ============================================================
+  // LABELS, CONTEXT, STATE
+  // ============================================================
   function getText(element) {
     const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
-    const generic = ['click here', 'read more', 'learn more', 'submit', 'cancel', 'ok', 'close'];
-    if (generic.includes(text.toLowerCase())) return '';
     return text.length > 120 ? text.slice(0, 120) + '...' : text;
   }
 
+  // For inputs, find associated label. For others, nearby heading or aria-label.
+  function getSemanticLabel(element) {
+    // aria-label wins
+    const aria = element.getAttribute('aria-label');
+    if (aria) return aria;
+
+    // aria-labelledby
+    const labelledBy = element.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const labelEl = document.getElementById(labelledBy);
+      if (labelEl?.innerText) return labelEl.innerText.trim();
+    }
+
+    // <label for="id">
+    if (element.id) {
+      const label = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+      if (label?.innerText) return label.innerText.trim();
+    }
+
+    // Wrapping label: <label>...<input></label>
+    const parentLabel = element.closest('label');
+    if (parentLabel && parentLabel !== element) {
+      const txt = parentLabel.innerText.replace(element.innerText || '', '').trim();
+      if (txt) return txt;
+    }
+
+    // For form inputs, look for placeholder or preceding label
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(element.nodeName)) {
+      const placeholder = element.getAttribute('placeholder');
+      if (placeholder) return `placeholder="${placeholder}"`;
+    }
+
+    // Nearest preceding heading (gives section context)
+    let el = element.previousElementSibling;
+    let scanned = 0;
+    while (el && scanned < 5) {
+      if (/^H[1-6]$/.test(el.nodeName)) return `near-heading: "${el.innerText.trim().slice(0, 60)}"`;
+      el = el.previousElementSibling;
+      scanned++;
+    }
+    // Check parent's previous siblings for a heading
+    if (element.parentElement) {
+      el = element.parentElement.previousElementSibling;
+      scanned = 0;
+      while (el && scanned < 3) {
+        if (/^H[1-6]$/.test(el.nodeName)) return `under-heading: "${el.innerText.trim().slice(0, 60)}"`;
+        el = el.previousElementSibling;
+        scanned++;
+      }
+    }
+
+    return null;
+  }
+
+  function getElementState(element) {
+    const state = [];
+    const tag = element.nodeName.toLowerCase();
+
+    if (tag === 'a' && element.href) state.push(`href=${element.getAttribute('href')}`);
+    if (tag === 'img' && element.alt) state.push(`alt="${element.alt}"`);
+    if (tag === 'input') {
+      const type = element.type || 'text';
+      state.push(`type=${type}`);
+      if (element.disabled) state.push('disabled');
+      if (element.required) state.push('required');
+      if (type === 'checkbox' || type === 'radio') {
+        state.push(element.checked ? 'checked' : 'unchecked');
+      }
+      if (element.value) state.push(`value="${element.value.slice(0, 40)}"`);
+    }
+    if (tag === 'button' && element.disabled) state.push('disabled');
+    if (tag === 'select') {
+      state.push(`options=${element.options?.length || 0}`);
+    }
+
+    const expanded = element.getAttribute('aria-expanded');
+    if (expanded) state.push(`expanded=${expanded}`);
+    const checked = element.getAttribute('aria-checked');
+    if (checked) state.push(`checked=${checked}`);
+    const selected = element.getAttribute('aria-selected');
+    if (selected) state.push(`selected=${selected}`);
+
+    return state.length ? state.join(', ') : null;
+  }
+
+  // ============================================================
+  // INSPECTION & FORMATTING
+  // ============================================================
   function inspectElement(element) {
     const info = {
-      u: window.location.href,
-      s: generateCssSelector(element),
-      a: generateSimpleSelector(element),
-      t: element.nodeName.toLowerCase()
+      url: window.location.href,
+      sel: generateValidatedSelector(element),
+      tag: element.nodeName.toLowerCase(),
     };
 
-    const path = getParentPath(element);
-    if (path) info.p = path;
+    const compInfo = getComponentInfo(element);
+    if (compInfo) {
+      if (compInfo.name) info.comp = compInfo.name;
+      if (compInfo.source) info.src = compInfo.source;
+      if (compInfo.framework && compInfo.framework !== 'react') info.fw = compInfo.framework;
+    }
 
-    const sib = getSiblingIndex(element);
-    if (sib) info.n = sib;
+    const label = getSemanticLabel(element);
+    if (label) info.label = label;
 
-    const comp = getReactComponentName(element);
-    if (comp) info.c = comp;
+    const state = getElementState(element);
+    if (state) info.state = state;
 
     const text = getText(element);
-    if (text) info.x = text;
+    if (text) info.txt = text;
 
     return info;
   }
 
-  function formatForLLM(info) {
-    let out = `url:${info.u}\nsel:${info.s}\nalt:${info.a}\ntag:${info.t}`;
-    if (info.p) out += `\npath:${info.p}`;
-    if (info.n) out += `\nnth:${info.n}`;
-    if (info.c) out += `\ncomp:${info.c}`;
-    if (info.x) out += `\ntxt:"${info.x}"`;
-    return out;
+  function formatYaml(info) {
+    const lines = [];
+    const order = ['url', 'sel', 'tag', 'comp', 'src', 'fw', 'label', 'state', 'txt'];
+    for (const key of order) {
+      if (info[key] == null) continue;
+      if (settings.fields && settings.fields[key] === false) continue;
+      const val = typeof info[key] === 'string' && (info[key].includes('\n') || info[key].includes('"'))
+        ? JSON.stringify(info[key])
+        : info[key];
+      lines.push(`${key}: ${val}`);
+    }
+    return lines.join('\n');
   }
 
+  function formatJson(info) {
+    const out = {};
+    const order = ['url', 'sel', 'tag', 'comp', 'src', 'fw', 'label', 'state', 'txt'];
+    for (const key of order) {
+      if (info[key] == null) continue;
+      if (settings.fields && settings.fields[key] === false) continue;
+      out[key] = info[key];
+    }
+    return JSON.stringify(out, null, 2);
+  }
+
+  function formatSentence(info) {
+    const parts = [];
+    if (info.comp) parts.push(`the ${info.comp} component`);
+    else if (info.tag) parts.push(`a <${info.tag}> element`);
+
+    if (info.txt) parts.push(`with text "${info.txt}"`);
+    else if (info.label) parts.push(`labeled "${info.label}"`);
+
+    if (info.src) parts.push(`defined in ${info.src}`);
+    if (info.state) parts.push(`(${info.state})`);
+
+    parts.push(`on ${info.url}`);
+    parts.push(`\n\nSelector: ${info.sel}`);
+    return parts.join(' ');
+  }
+
+  function formatForLLM(info) {
+    if (settings.format === 'json') return formatJson(info);
+    if (settings.format === 'sentence') return formatSentence(info);
+    return formatYaml(info);
+  }
+
+  // ============================================================
+  // UI
+  // ============================================================
   function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-      showCopiedToast();
-    });
+    navigator.clipboard.writeText(text).then(() => showCopiedToast());
   }
 
   function showCopiedToast() {
@@ -349,10 +609,10 @@
     const tag = element.nodeName.toLowerCase();
     const idStr = element.id ? `#${element.id}` : '';
     const cls = element.className && typeof element.className === 'string'
-      ? '.' + element.className.trim().split(/\s+/).slice(0,2).join('.')
+      ? '.' + element.className.trim().split(/\s+/).slice(0, 2).join('.')
       : '';
-    const compName = getReactComponentName(element);
-    const compStr = compName ? ` <${compName}>` : '';
+    const compInfo = getComponentInfo(element);
+    const compStr = compInfo?.name ? ` <${compInfo.name}>` : '';
     preview.innerHTML = `<span style="background:#1e40af;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;font-family:monospace;">&lt;${tag}${idStr}${cls}&gt;${compStr}</span>`;
     preview.style.cssText = `
       position:absolute;pointer-events:none;z-index:2147483647;
@@ -369,6 +629,9 @@
     currentPreview = null;
   }
 
+  // ============================================================
+  // EVENT HANDLERS
+  // ============================================================
   document.addEventListener('mouseover', function(e) {
     if (!window.__llmInspectorActive) return;
     if (e.target.closest('.llm-inspector-highlight, .llm-inspector-preview')) return;
