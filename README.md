@@ -9,11 +9,14 @@ The goal is to help you quickly point things out to your coding agent. Instead o
 For example, you select a button and tell your agent:
 
 > "Make this button blue"  
-> `u:https://myapp.com/dashboard`  
-> `s:#submit-btn`  
-> `t:button`  
-> `c:SubmitButton`  
-> `x:"Create account"`
+> `url:https://myapp.com/dashboard`  
+> `sel:#submit-btn`  
+> `alt:button.btn-primary`  
+> `tag:button`  
+> `path:header > nav`  
+> `nth:2/3`  
+> `comp:SubmitButton`  
+> `txt:"Create account"`
 
 The agent now knows exactly which element you're talking about, even in a large React codebase.
 
@@ -55,12 +58,28 @@ The agent now knows exactly which element you're talking about, even in a large 
 ### Example Output
 
 ```
-u:https://github.com/octocat/Hello-World
-s:#submit-btn
-t:button
-c:SubmitButton
-x:"Create pull request"
+url:https://github.com/octocat/Hello-World
+sel:#submit-btn
+alt:button.btn-primary
+tag:button
+path:header > nav > ul
+nth:2/5
+comp:SubmitButton
+txt:"Create pull request"
 ```
+
+**Fields explained:**
+
+| Key | Meaning | Why it helps the LLM |
+|---|---|---|
+| `url` | **URL** | Knows which page |
+| `sel` | **Best selector** | Most robust unique locator (e.g. `data-testid`, ID, class path) |
+| `alt` | **Alt selector** | Simple fallback without ancestry (e.g. `button.btn-primary`) |
+| `tag` | **Tag** | Knows it's a `<button>` vs `<a>` vs `<div>` |
+| `path` | **Parent path** | Semantic breadcrumbs: `header > nav > ul` gives structural context |
+| `nth` | **Sibling index** | "2nd button of 5" — disambiguates when multiple similar elements exist |
+| `comp` | **React component** | Jumps straight to the source file: `SubmitButton.jsx` |
+| `txt` | **Text content** | Semantic label the LLM can grep for |
 
 ### Cancel Selection
 
@@ -82,18 +101,35 @@ llm-copy/
 ## How It Works
 
 ### CSS Selector Generation
-The extension builds selectors by prioritizing (in order):
+The extension builds **two selectors** for redundancy:
+
+**Primary (`s`)** — most robust unique locator, built from the element up:
 1. `data-testid`, `data-test`, `aria-label`, `role` attributes
 2. Element ID
 3. Stable class names (filters out Tailwind-style utility classes)
 4. `nth-of-type` index for disambiguation
-5. Caps depth at 4 levels to keep selectors short
+5. Caps depth at 4 levels
+
+**Alternative (`a`)** — simple fallback without ancestry:
+- Just the tag + key attributes or classes, so it still works if the page structure changes
+
+### Semantic Parent Path (`p`)
+Walks up the DOM collecting meaningful landmarks:
+- HTML5 semantic tags: `<header>`, `<nav>`, `<main>`, `<aside>`, `<footer>`, `<section>`, `<article>`
+- ARIA roles
+- Element IDs and `aria-label` attributes
+
+This gives the LLM human-readable context like `header > nav > user-menu`.
+
+### Sibling Index (`n`)
+Computes the element's position among same-tag siblings: `2/5` means "2nd button of 5 in this container." This disambiguates lists, toolbars, and grids where multiple similar elements exist.
 
 ### React Detection
 React stores internal "fiber" data on DOM elements. The extension:
 1. Scans elements for React fiber properties (`__reactFiber$...`)
 2. Traverses up the fiber tree to find the nearest named component
-3. Includes the component name in both hover preview and copied output
+3. Falls back to React DevTools hook if installed
+4. Includes the component name in both hover preview and copied output
 
 This works with function components, class components, forwardRef, and memo wrappers.
 

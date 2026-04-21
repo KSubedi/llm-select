@@ -7,37 +7,189 @@
   let currentPreview = null;
 
   // --- React component detection ---
-  function getReactComponentName(element) {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+  const __reactCache = new WeakMap();
 
-    // React 17+ uses keys like __reactFiber$abc123, older uses __reactInternalInstance$...
-    const reactKey = Object.keys(element).find(k =>
-      k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
-    );
-    if (!reactKey) return null;
+  function findReactKeys(element) {
+    if (!element || typeof element !== 'object') return [];
+    try {
+      const keys = Object.keys(element);
+      return keys.filter(k =>
+        k.startsWith('__react') ||
+        k.startsWith('__reactInternal') ||
+        k.startsWith('_react') ||
+        k.includes('reactFiber') ||
+        k.includes('reactContainer')
+      );
+    } catch (e) {
+      return [];
+    }
+  }
 
-    let fiber = element[reactKey];
+  function getFiberTypeName(type) {
+    if (!type) return null;
+    if (typeof type === 'string') return null;
+    if (type.name) return type.name;
+    if (type.displayName) return type.displayName;
+    if (type.render) {
+      if (type.render.name) return type.render.name;
+      if (type.render.displayName) return type.render.displayName;
+    }
+    return null;
+  }
+
+  function walkFiber(fiber, maxDepth = 30) {
+    let current = fiber;
     let depth = 0;
-    const maxDepth = 20;
+    const seen = new Set();
 
-    while (fiber && depth < maxDepth) {
-      // Named function component or class component
-      const type = fiber.type;
-      if (type) {
-        if (type.name) return type.name;
-        if (type.displayName) return type.displayName;
+    while (current && depth < maxDepth) {
+      if (seen.has(current)) break;
+      seen.add(current);
+
+      let name = getFiberTypeName(current.type);
+      if (name) return name;
+
+      name = getFiberTypeName(current.elementType);
+      if (name) return name;
+
+      if (current._debugOwner) {
+        name = walkFiber(current._debugOwner, maxDepth - depth);
+        if (name) return name;
       }
-      // Fallback: check elementType for forwardRef/memo
-      const et = fiber.elementType;
-      if (et) {
-        if (et.name) return et.name;
-        if (et.displayName) return et.displayName;
-      }
-      // Traverse up
-      fiber = fiber.return || fiber._debugOwner;
+
+      current = current.return;
       depth++;
     }
     return null;
+  }
+
+  function getReactComponentName(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+    if (__reactCache.has(element)) return __reactCache.get(element);
+
+    let el = element;
+    let domDepth = 0;
+    const maxDomDepth = 10;
+
+    while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < maxDomDepth) {
+      const reactKeys = findReactKeys(el);
+      for (const key of reactKeys) {
+        const val = el[key];
+        if (!val) continue;
+
+        if (typeof val === 'object' && val !== null) {
+          const name = walkFiber(val);
+          if (name) {
+            __reactCache.set(element, name);
+            return name;
+          }
+        }
+
+        if (val._internalRoot && val._internalRoot.current) {
+          const name = walkFiber(val._internalRoot.current);
+          if (name) {
+            __reactCache.set(element, name);
+            return name;
+          }
+        }
+      }
+      el = el.parentElement;
+      domDepth++;
+    }
+
+    try {
+      const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+      if (hook && hook.renderers) {
+        for (const renderer of hook.renderers.values()) {
+          if (renderer.findFiberByHostInstance) {
+            const fiber = renderer.findFiberByHostInstance(element);
+            if (fiber) {
+              const name = walkFiber(fiber);
+              if (name) {
+                __reactCache.set(element, name);
+                return name;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    __reactCache.set(element, null);
+    return null;
+  }
+
+  // --- Semantic helpers ---
+  const LANDMARKS = new Set(['header', 'nav', 'main', 'aside', 'footer', 'section', 'article']);
+
+  function getLandmarkName(element) {
+    const tag = element.nodeName.toLowerCase();
+    if (LANDMARKS.has(tag)) return tag;
+    const role = element.getAttribute('role');
+    if (role) return role;
+    return null;
+  }
+
+  function getSemanticLabel(element) {
+    // Best human-readable label for an element
+    if (element.id) return `#${element.id}`;
+    const aria = element.getAttribute('aria-label');
+    if (aria) return aria;
+    const landmark = getLandmarkName(element);
+    if (landmark) return `<${landmark}>`;
+    const dataTest = element.getAttribute('data-testid') || element.getAttribute('data-test');
+    if (dataTest) return `[testid=${dataTest}]`;
+    return null;
+  }
+
+  function getParentPath(element, maxDepth = 4) {
+    const crumbs = [];
+    let current = element.parentElement;
+    let depth = 0;
+
+    while (current && current.nodeType === Node.ELEMENT_NODE && depth < maxDepth) {
+      const label = getSemanticLabel(current);
+      if (label) crumbs.unshift(label);
+      current = current.parentElement;
+      depth++;
+    }
+
+    return crumbs.join(' > ');
+  }
+
+  function getSiblingIndex(element) {
+    if (!element.parentElement) return null;
+    const siblings = Array.from(element.parentElement.children).filter(s => s.nodeName === element.nodeName);
+    if (siblings.length <= 1) return null;
+    const idx = siblings.indexOf(element) + 1;
+    return `${idx}/${siblings.length}`;
+  }
+
+  function generateSimpleSelector(element) {
+    // A simple fallback selector without ancestry
+    const tag = element.nodeName.toLowerCase();
+    if (element.id) return `#${CSS.escape(element.id)}`;
+
+    const strongAttrs = ['data-testid', 'data-test', 'aria-label', 'name'];
+    for (const attr of strongAttrs) {
+      const val = element.getAttribute(attr);
+      if (val) return `${tag}[${attr}="${CSS.escape(val)}"]`;
+    }
+
+    if (element.className && typeof element.className === 'string') {
+      const classes = element.className.trim().split(/\s+/).filter(c => c && !isUtilityClass(c));
+      if (classes.length > 0) {
+        return `${tag}.${classes.map(c => CSS.escape(c)).join('.')}`;
+      }
+    }
+
+    const siblings = Array.from(element.parentElement?.children || []).filter(s => s.nodeName === element.nodeName);
+    if (siblings.length > 1) {
+      const idx = siblings.indexOf(element) + 1;
+      return `${tag}:nth-of-type(${idx})`;
+    }
+
+    return tag;
   }
 
   // Generate a short, robust CSS selector
@@ -112,26 +264,38 @@
     if (!text) return '';
     const generic = ['click here', 'read more', 'learn more', 'submit', 'cancel', 'ok', 'close'];
     if (generic.includes(text.toLowerCase())) return '';
-    return text.length > 80 ? text.slice(0, 80) + '...' : text;
+    return text.length > 120 ? text.slice(0, 120) + '...' : text;
   }
 
   function inspectElement(element) {
     const info = {
       u: window.location.href,
       s: generateCssSelector(element),
-      t: element.nodeName.toLowerCase(),
-      x: getText(element)
+      a: generateSimpleSelector(element),
+      t: element.nodeName.toLowerCase()
     };
+
+    const path = getParentPath(element);
+    if (path) info.p = path;
+
+    const sib = getSiblingIndex(element);
+    if (sib) info.n = sib;
+
     const comp = getReactComponentName(element);
     if (comp) info.c = comp;
+
+    const text = getText(element);
+    if (text) info.x = text;
+
     return info;
   }
 
   function formatForLLM(info) {
-    let out = `u:${info.u}\ns:${info.s}`;
-    if (info.t) out += `\nt:${info.t}`;
-    if (info.c) out += `\nc:${info.c}`;
-    if (info.x) out += `\nx:"${info.x}"`;
+    let out = `url:${info.u}\nsel:${info.s}\nalt:${info.a}\ntag:${info.t}`;
+    if (info.p) out += `\npath:${info.p}`;
+    if (info.n) out += `\nnth:${info.n}`;
+    if (info.c) out += `\ncomp:${info.c}`;
+    if (info.x) out += `\ntxt:"${info.x}"`;
     return out;
   }
 
