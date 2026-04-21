@@ -2,6 +2,21 @@
 
 A minimal Chrome extension that lets you inspect and copy DOM element references in a token-efficient format perfect for LLM prompts. It detects React component names, generates robust CSS selectors, and copies everything to your clipboard in one click.
 
+## Why this exists
+
+The goal is to help you quickly point things out to your coding agent. Instead of describing where something is on a page, just select it and paste the reference.
+
+For example, you select a button and tell your agent:
+
+> "Make this button blue"  
+> `u:https://myapp.com/dashboard`  
+> `s:#submit-btn`  
+> `t:button`  
+> `c:SubmitButton`  
+> `x:"Create account"`
+
+The agent now knows exactly which element you're talking about, even in a large React codebase.
+
 ## Features
 
 - **One-click element inspection** - Click the extension icon or press a keyboard shortcut to enter selection mode
