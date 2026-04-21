@@ -81,12 +81,21 @@
     let domDepth = 0;
     while (el && el.nodeType === Node.ELEMENT_NODE && domDepth < 25) {
       const keys = findReactKeys(el);
+      // Prefer fiber keys, then root containers, then other react keys
+      const fiberKey = keys.find(k => k.startsWith('__reactFiber') || k.includes('reactFiber'));
+      if (fiberKey) {
+        const val = el[fiberKey];
+        if (val && typeof val === 'object') return val;
+      }
       for (const key of keys) {
         const val = el[key];
-        if (!val) continue;
-        if (typeof val === 'object' && val.stateNode !== undefined) return val;
-        if (typeof val === 'object' && val.type !== undefined) return val;
+        if (!val || typeof val !== 'object') continue;
         if (val._internalRoot?.current) return val._internalRoot.current;
+        // Heuristic: anything that looks fiber-shaped
+        if (val.stateNode !== undefined || val.type !== undefined ||
+            val.return !== undefined || val.memoizedProps !== undefined) {
+          return val;
+        }
       }
       el = el.parentElement;
       domDepth++;
