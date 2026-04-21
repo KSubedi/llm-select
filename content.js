@@ -2,6 +2,7 @@
   // Prevent double-injection
   if (window.__llmInspectorLoaded) return;
   window.__llmInspectorLoaded = true;
+  window.__llmInspectorVersion = '1.2.0-debug';
 
   // ============================================================
   // DEFAULT SETTINGS
@@ -706,6 +707,18 @@
     e.preventDefault();
     e.stopPropagation();
     const info = inspectElement(e.target);
+    if (window.__llmInspectorDebug) {
+      const fiber = getFiberFromElement(e.target);
+      console.log('[LLM Inspector] click debug', {
+        element: e.target,
+        info,
+        fiberFound: !!fiber,
+        fiberType: fiber?.type,
+        fiberHasDebugSource: !!fiber?._debugSource,
+        fiberHasDebugOwner: !!fiber?._debugOwner,
+        reactInfo: fiber ? getReactInfo(e.target) : null,
+      });
+    }
     copyToClipboard(formatForLLM(info));
     removeHighlight();
     window.__llmInspectorActive = false;
