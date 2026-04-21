@@ -103,6 +103,33 @@
     return null;
   }
 
+  // Framework/router plumbing we don't want to surface as the component or in ancestors
+  const WRAPPER_NAMES = new Set([
+    'HydratedRouter', 'ServerRouter', 'RouterProvider', 'BrowserRouter', 'MemoryRouter', 'HashRouter',
+    'Outlet', 'Route', 'Routes', 'Router',
+    'Await', 'ResolveAwait',
+    'Provider', 'Consumer', 'Context', 'ContextProvider',
+    'Suspense', 'SuspenseList', 'ErrorBoundary', 'Fragment', 'StrictMode', 'Profiler',
+    'QueryClientProvider', 'HydrationBoundary',
+    'ThemeProvider', 'HelmetProvider',
+    'Observer', 'AutoObserver',
+  ]);
+  const WRAPPER_PATTERNS = [
+    /^WithComponentProps\d*$/,       // React Router v7
+    /^_?withRouter$/i,
+    /^_c\d*$/,                        // react-refresh anonymous wrappers
+    /^\$\$.*$/,                       // internal sigils
+    /^Connect\(.+\)$/,                // react-redux
+    /^Observer\(.+\)$/,                // mobx
+    /^ForwardRef(\(.+\))?$/,
+    /^Memo(\(.+\))?$/,
+  ];
+  function isWrapperName(n) {
+    if (!n) return true;
+    if (WRAPPER_NAMES.has(n)) return true;
+    return WRAPPER_PATTERNS.some(r => r.test(n));
+  }
+
   function getReactInfo(element) {
     const fiber = getFiberFromElement(element);
     if (!fiber) return null;
@@ -111,6 +138,7 @@
     let depth = 0;
     const seen = new Set();
     let name = null;
+    let fallbackName = null;   // first named thing, even if it's a wrapper
     let source = null;
     let sourceFile = null;
     let sourceLine = null;
@@ -122,8 +150,11 @@
 
       const typeName = getFiberTypeName(current.type) || getFiberTypeName(current.elementType);
       if (typeName) {
-        if (!name) name = typeName;
-        if (chain[chain.length - 1] !== typeName) chain.push(typeName);
+        if (!fallbackName) fallbackName = typeName;
+        if (!name && !isWrapperName(typeName)) name = typeName;
+        if (!isWrapperName(typeName) && chain[chain.length - 1] !== typeName) {
+          chain.push(typeName);
+        }
       }
 
       // _debugSource is present in dev builds with @babel/plugin-transform-react-jsx-source
@@ -147,13 +178,14 @@
       depth++;
     }
 
-    if (!name && !source) return null;
+    const finalName = name || fallbackName;
+    if (!finalName && !source) return null;
 
-    // Ancestors = named components above the immediate one, capped at 3
+    // Ancestors = named user components above the immediate one, capped at 3
     const ancestors = chain.slice(1, 4);
     return {
       framework: 'react',
-      name,
+      name: finalName,
       source,
       sourceFile,
       sourceLine,
