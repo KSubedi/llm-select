@@ -2,7 +2,7 @@
   // Prevent double-injection
   if (window.__llmInspectorLoaded) return;
   window.__llmInspectorLoaded = true;
-  window.__llmInspectorVersion = '1.2.0-debug';
+  window.__llmInspectorVersion = '1.2.1-debug';
 
   // ============================================================
   // DEFAULT SETTINGS
@@ -718,7 +718,12 @@
     const info = inspectElement(e.target);
     if (window.__llmInspectorDebug) {
       const fiber = getFiberFromElement(e.target);
+      // Raw view of what's on the clicked element itself
+      const rawKeys = Object.keys(e.target).filter(k => k.startsWith('__react') || k.startsWith('_react'));
+      const rawFiberKey = rawKeys.find(k => k.startsWith('__reactFiber') || k.includes('reactFiber'));
+      const rawFiber = rawFiberKey ? e.target[rawFiberKey] : null;
       console.log('[LLM Inspector] click debug', {
+        version: window.__llmInspectorVersion,
         element: e.target,
         info,
         fiberFound: !!fiber,
@@ -726,6 +731,11 @@
         fiberHasDebugSource: !!fiber?._debugSource,
         fiberHasDebugOwner: !!fiber?._debugOwner,
         reactInfo: fiber ? getReactInfo(e.target) : null,
+        rawKeysOnElement: rawKeys,
+        rawFiberKey,
+        rawFiberIsObject: rawFiber && typeof rawFiber === 'object',
+        rawFiberStateNode: rawFiber?.stateNode === e.target ? 'self' : typeof rawFiber?.stateNode,
+        rawFiberHasType: rawFiber?.type !== undefined,
       });
     }
     copyToClipboard(formatForLLM(info));
