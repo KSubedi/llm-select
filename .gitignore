@@ -25,3 +25,8 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+
+# Python development tools
+.venv/
+__pycache__/
+*.pyc

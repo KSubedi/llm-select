@@ -1,6 +1,6 @@
 # LLM Element Inspector
 
-A minimal Chrome extension that lets you inspect and copy DOM element references in a format perfect for LLM prompts. It detects component names across React, Vue, Svelte, Angular, and Solid, finds source file locations in dev builds, generates validated CSS selectors, and copies everything to your clipboard in one click.
+A minimal Chrome and Firefox extension that lets you inspect and copy DOM element references in a format perfect for LLM prompts. It detects component names across React, Vue, Svelte, Angular, and Solid, finds source file locations in dev builds, generates validated CSS selectors, and copies everything to your clipboard in one click.
 
 ## Why this exists
 
@@ -40,7 +40,7 @@ The `<CodeReference>` wrapper makes it obvious to the model that this is context
 - **Smart context** — Finds associated `<label>`, nearby headings, `aria-label`, placeholders
 - **Element state** — Captures `href`, `disabled`, `checked`, `aria-expanded`, input type/value, and more
 - **Configurable** — Settings page to toggle fields and choose output format (XML / YAML / JSON / plain English)
-- **Keyboard shortcut** — Default is `Alt+Shift+X`, customizable in Chrome
+- **Keyboard shortcut** — Default is `Alt+Shift+X` (`Ctrl+Shift+Y` in Chrome on Linux), customizable in either browser
 - **No popup dialogs** — Instant toggle, minimal friction
 
 ## Installation
@@ -51,17 +51,40 @@ The `<CodeReference>` wrapper makes it obvious to the model that this is context
 2. Open Chrome and navigate to `chrome://extensions/`
 3. Enable **Developer mode** (toggle in the top-right corner)
 4. Click **Load unpacked**
-5. Select the `llm-copy` directory
+5. Select the `llm-select` directory (or `dist/chrome` after building)
 
-### Chrome Web Store
+### Firefox (142 or newer)
 
-*(Coming soon)*
+1. Download the Firefox ZIP from [Releases](https://github.com/KSubedi/llm-select/releases) and extract it, or run `python3 scripts/build.py` and use `dist/firefox`.
+2. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on**.
+3. Select the Firefox package's `manifest.json`.
+
+Temporary add-ons are removed when Firefox restarts. The GitHub Firefox ZIP is unsigned; permanent installation in standard Firefox requires Mozilla signing. This repository does not yet have an AMO listing. Renaming the ZIP to XPI does not sign it.
+
+### Release packages
+
+Run `python3 scripts/build.py` (Python 3, no build dependencies). This creates unpacked extensions in `dist/chrome` and `dist/firefox`, browser-specific versioned ZIPs, and `dist/SHA256SUMS`. Use the Chrome ZIP for Chrome Web Store uploads and the Firefox ZIP for Mozilla signing/submission. Store publication/signing is separate from a GitHub release.
+
+Both packages use Manifest V3. Chrome uses a background service worker; Firefox uses a nonpersistent background script and a stable Gecko ID. The Firefox package declares no data collection: inspection stays on your device, output goes to your clipboard, and settings use browser sync storage.
+
+Validation:
+
+```sh
+python3 scripts/build.py
+npx --yes web-ext lint --source-dir dist/firefox --warnings-as-errors
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
+# With Openbox, xdotool and Xvfb installed:
+PATH="$PWD/.venv/bin:$PATH" xvfb-run -a sh tests/run-browser-smoke.sh
+```
+
+The browser tests require Firefox, Chromium/Chrome, matching WebDriver executables on PATH, and Xvfb/xdotool/Openbox on Linux. Set `FIREFOX_BINARY` or `CHROME_BINARY` to override browser locations. They verify real extension loading, shortcut toggling, React metadata across execution worlds, clipboard output on secure and HTTP origins, Escape, navigation, and saved settings.
 
 ## Usage
 
 1. **Toggle selection mode:**
    - Click the extension icon in your toolbar, **or**
-   - Press `Alt+Shift+X` (customizable at `chrome://extensions/shortcuts`)
+   - Press `Alt+Shift+X` (`Ctrl+Shift+Y` in Chrome on Linux; customizable at `chrome://extensions/shortcuts`, or Firefox Add-ons Manager → gear → Manage Extension Shortcuts)
 
 2. **Hover** over any element to see a blue highlight and tag preview
 
@@ -71,7 +94,7 @@ The `<CodeReference>` wrapper makes it obvious to the model that this is context
 
 ### Configuration
 
-Right-click the extension icon → **Options** (or visit `chrome://extensions/` and click Details → Extension options).
+Right-click the extension icon → **Settings**. You can also open options through Chrome’s extensions page or Firefox’s Add-ons Manager.
 
 You can customize:
 - **Output format:** XML (default), YAML-ish, JSON, or plain English sentence
@@ -167,7 +190,7 @@ Depending on element type, includes:
 ## Project Structure
 
 ```
-llm-copy/
+llm-select/
 ├── manifest.json       # Extension manifest (Manifest V3)
 ├── background.js       # Service worker: handles icon click & keyboard shortcuts
 ├── content.js          # Content script: DOM inspection, framework detection, selection logic
@@ -181,8 +204,8 @@ llm-copy/
 
 ## Browser Support
 
-- Chrome / Edge / Brave / Opera (Manifest V3)
-- Firefox (requires minor manifest adjustments for Manifest V2)
+- Chrome 111+ / current Edge, Brave, Opera (Manifest V3)
+- Firefox 142+ (Manifest V3; use the Firefox build)
 
 ## Contributing
 

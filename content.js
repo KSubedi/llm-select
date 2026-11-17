@@ -380,13 +380,45 @@
   // ============================================================
   // UI
   // ============================================================
-  function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => showCopiedToast());
+  async function copyToClipboard(text) {
+    try {
+      // The Clipboard API is unavailable on ordinary HTTP pages.
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        copyWithTextarea(text);
+      }
+      showCopiedToast();
+    } catch (error) {
+      try {
+        copyWithTextarea(text);
+        showCopiedToast();
+      } catch (fallbackError) {
+        console.error('[LLM Inspector] Copy failed:', fallbackError);
+        showCopiedToast('Could not copy. Select the element again.');
+      }
+    }
   }
 
-  function showCopiedToast() {
+  function copyWithTextarea(text) {
+    const previousFocus = document.activeElement;
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;';
+    document.documentElement.appendChild(textarea);
+    try {
+      textarea.focus();
+      textarea.select();
+      if (!document.execCommand('copy')) throw new Error('Clipboard copy was denied');
+    } finally {
+      textarea.remove();
+      previousFocus?.focus({ preventScroll: true });
+    }
+  }
+
+  function showCopiedToast(message = 'Copied to clipboard') {
     const toast = document.createElement('div');
-    toast.textContent = 'Copied to clipboard';
+    toast.textContent = message;
     toast.style.cssText = `
       position:fixed;z-index:2147483647;bottom:20px;right:20px;
       background:#1e1e2e;color:#fff;padding:10px 16px;border-radius:6px;
@@ -432,7 +464,10 @@
       : '';
     const compInfo = getComponentInfo(element);
     const compStr = compInfo?.name ? ` <${compInfo.name}>` : '';
-    preview.innerHTML = `<span style="background:#1e40af;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;font-family:monospace;">&lt;${tag}${idStr}${cls}&gt;${compStr}</span>`;
+    const badge = document.createElement('span');
+    badge.style.cssText = 'background:#1e40af;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;font-family:monospace;';
+    badge.textContent = `<${tag}${idStr}${cls}>${compStr}`;
+    preview.appendChild(badge);
     preview.style.cssText = `
       position:absolute;pointer-events:none;z-index:2147483647;
       top:${rect.top + scrollY - 24}px;left:${rect.left + scrollX}px;

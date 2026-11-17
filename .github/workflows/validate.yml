@@ -1,0 +1,37 @@
+name: Validate browser packages
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: browser-actions/setup-firefox@v1
+      - uses: browser-actions/setup-geckodriver@latest
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+          install-chromedriver: true
+      - run: python scripts/build.py
+      - run: npx --yes web-ext@10.8.0 lint --source-dir dist/firefox --warnings-as-errors
+      - run: sudo apt-get update && sudo apt-get install -y xdotool openbox
+      - run: pip install -r tests/requirements.txt
+      - run: xvfb-run -a sh tests/run-browser-smoke.sh
+        env:
+          CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-packages
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS

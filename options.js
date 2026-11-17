@@ -105,16 +105,20 @@ function renderFields() {
     wrapper.className = 'field-toggle';
     wrapper.innerHTML = `
       <div class="meta">
-        <div class="field-name">${info.label}</div>
-        <span class="field-desc">${info.desc}</span>
+        <div class="field-name"></div>
+        <span class="field-desc"></span>
       </div>
       <div style="position:relative;">
-        <input type="checkbox" id="field-${key}" ${enabled ? 'checked' : ''}>
+        <input type="checkbox">
         <div class="switch"></div>
       </div>
     `;
     container.appendChild(wrapper);
     const input = wrapper.querySelector('input');
+    wrapper.querySelector('.field-name').textContent = info.label;
+    wrapper.querySelector('.field-desc').textContent = info.desc;
+    input.id = `field-${key}`;
+    input.checked = enabled;
     input.addEventListener('change', () => {
       currentSettings.fields[key] = input.checked;
       save();
