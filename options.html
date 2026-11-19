@@ -341,6 +341,16 @@
 
     <div class="section">
       <div class="section-header">
+        <div class="section-title">Keyboard shortcut</div>
+        <kbd id="inspectorShortcut" aria-live="polite">Loading…</kbd>
+      </div>
+      <div class="section-desc">Toggle the inspector with a shortcut you choose.</div>
+      <button class="btn" id="changeShortcut">Change shortcut</button>
+      <p id="shortcutError" class="section-desc" role="alert" hidden></p>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
         <div class="section-title">Output format</div>
         <div class="section-hint">wrapper + body</div>
       </div>
@@ -391,8 +401,7 @@
     </div>
 
     <div class="footer">
-      <div>Toggle inspector with <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd></div>
-      <div>by <a href="https://ksubedi.com" target="_blank" rel="noopener noreferrer">Kaushal Subedi</a> · v1.1</div>
+      <div>by <a href="https://ksubedi.com" target="_blank" rel="noopener noreferrer">Kaushal Subedi</a> · v<span id="extensionVersion"></span></div>
     </div>
   </div>
 

@@ -40,7 +40,7 @@ The `<CodeReference>` wrapper makes it obvious to the model that this is context
 - **Smart context** — Finds associated `<label>`, nearby headings, `aria-label`, placeholders
 - **Element state** — Captures `href`, `disabled`, `checked`, `aria-expanded`, input type/value, and more
 - **Configurable** — Settings page to toggle fields and choose output format (XML / YAML / JSON / plain English)
-- **Keyboard shortcut** — Default is `Alt+Shift+X` (`Ctrl+Shift+Y` in Chrome on Linux), customizable in either browser
+- **Configurable keyboard shortcut** — Default is `Alt+Shift+X` (`Ctrl+Shift+Y` in Chrome on Linux), customizable in either browser
 - **No popup dialogs** — Instant toggle, minimal friction
 
 ## Installation
@@ -96,7 +96,9 @@ The browser tests require Firefox, Chromium/Chrome, matching WebDriver executabl
 
 Right-click the extension icon → **Settings**. You can also open options through Chrome’s extensions page or Firefox’s Add-ons Manager.
 
-You can customize:
+Choose **Change shortcut** in Settings to open your browser’s shortcut editor. Change the binding for **LLM Element Inspector** there. The Settings page shows the current binding or **Unassigned** when you clear it.
+
+You can also customize:
 - **Output format:** XML (default), YAML-ish, JSON, or plain English sentence
 - **Which fields to include:** toggle each field on/off to minimize token usage
 

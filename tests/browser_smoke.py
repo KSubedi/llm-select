@@ -45,24 +45,23 @@ server = ThreadingHTTPServer(('0.0.0.0', 0), Handler)
 Thread(target=server.serve_forever, daemon=True).start()
 
 
-def shortcut(driver):
-    if shutil.which('xdotool'):
-        windows = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--name', 'LLM Inspector test fixture'], text=True).splitlines()
-        subprocess.run(['xdotool', 'windowactivate', '--sync', windows[-1]], check=True)
-        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'alt+shift+x' if driver.capabilities['browserName'] == 'firefox' else 'ctrl+shift+y'], check=True)
-    else:
-        ActionChains(driver).key_down(Keys.CONTROL).key_down(Keys.SHIFT).send_keys('y').key_up(Keys.SHIFT).key_up(Keys.ALT).perform()
+def shortcut(driver, key=None):
+    if key is None:
+        key = 'alt+shift+x' if driver.capabilities['browserName'] == 'firefox' else 'ctrl+shift+y'
+    windows = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--name',
+                                       'LLM Inspector test fixture'], text=True).splitlines()
+    subprocess.run(['xdotool', 'windowactivate', '--sync', windows[-1]], check=True)
+    subprocess.run(['xdotool', 'key', '--clearmodifiers', key], check=True)
 
 
-def inspect(driver, wait, expected_format='xml'):
-    shortcut(driver)
+def inspect(driver, wait, expected_format='xml', key=None):
+    shortcut(driver, key)
     wait.until(lambda d: d.execute_script("return document.body.style.cursor") == 'crosshair')
     target = driver.find_element(By.ID, 'target')
     ActionChains(driver).move_to_element_with_offset(driver.find_element(By.TAG_NAME, 'html'), 200, 200).perform()
     ActionChains(driver).move_to_element(target).perform()
-    wait.until(lambda d: d.find_elements(By.CLASS_NAME, 'llm-inspector-preview'))
-    preview = driver.find_element(By.CLASS_NAME, 'llm-inspector-preview').text
-    assert '<SubmitButton>' in preview, preview
+    wait.until(lambda d: any('<SubmitButton>' in preview.text
+                             for preview in d.find_elements(By.CLASS_NAME, 'llm-inspector-preview')))
     target.click()
     wait.until(lambda d: d.execute_script("return document.body.style.cursor") == '')
     wait.until(lambda d: 'Copied to clipboard' in d.find_element(By.TAG_NAME, 'html').text)
@@ -124,13 +123,38 @@ def run(browser):
             mapping = json.loads(json.loads(line.split(', ', 1)[1].rsplit(');', 1)[0]))
             base = 'moz-extension://' + mapping['llm-select@ksubedi.com']
         driver.get(base + '/options.html')
+        default_shortcut = 'Alt+Shift+X' if browser == 'firefox' else 'Ctrl+Shift+Y'
+        wait.until(lambda d: d.find_element(By.ID, 'inspectorShortcut').text == default_shortcut)
+        options_tab = driver.current_window_handle
+        driver.find_element(By.ID, 'changeShortcut').click()
+        wait.until(lambda d: len(d.window_handles) == 2)
+        driver.switch_to.window(next(tab for tab in driver.window_handles if tab != options_tab))
+        shortcut_page = 'about:addons' if browser == 'firefox' else 'chrome://extensions/shortcuts'
+        wait.until(lambda d: d.current_url.startswith(shortcut_page))
+        if browser == 'firefox':
+            shortcut_input = wait.until(lambda d: d.find_element(By.CSS_SELECTOR, 'input[type="text"]'))
+        else:
+            shortcut_input = wait.until(lambda d: d.execute_script("""
+                return document.querySelector('extensions-manager').shadowRoot
+                  .querySelector('extensions-keyboard-shortcuts').shadowRoot
+                  .querySelector('cr-shortcut-input')?.shadowRoot.querySelector('#edit');
+            """))
+        shortcut_input.click()
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+8'], check=True)
+        driver.close()
+        driver.switch_to.window(options_tab)
+        wait.until(lambda d: d.find_element(By.ID, 'inspectorShortcut').text == 'Ctrl+Shift+8')
+        driver.get(f'http://localhost:{server.server_port}/')
+        inspect(driver, wait, key='ctrl+shift+8')
+        driver.get(base + '/options.html')
+        print(f'{browser}: changed shortcut in browser and used new binding', flush=True)
         radio = wait.until(lambda d: d.find_element(By.CSS_SELECTOR, 'input[value="json"]'))
         driver.execute_script('arguments[0].click()', radio)
         # Wait for asynchronous settings persistence by reloading the settings page.
         driver.refresh()
         wait.until(lambda d: d.find_element(By.CSS_SELECTOR, 'input[value="json"]').is_selected())
         driver.get(f'http://localhost:{server.server_port}/')
-        inspect(driver, wait, 'json')
+        inspect(driver, wait, 'json', key='ctrl+shift+8')
         print(f'{browser}: settings save/reload and JSON output OK', flush=True)
         # A non-loopback HTTP origin exercises the insecure-context clipboard fallback.
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
@@ -138,7 +162,7 @@ def run(browser):
             local_ip = route.getsockname()[0]
         driver.get(f'http://{local_ip}:{server.server_port}/')
         assert not driver.execute_script('return window.isSecureContext')
-        inspect(driver, wait, 'json')
+        inspect(driver, wait, 'json', key='ctrl+shift+8')
         print(f'{browser}: HTTP clipboard fallback OK', flush=True)
         print(f'{browser}: PASS ({driver.capabilities["browserVersion"]})', flush=True)
     except Exception:

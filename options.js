@@ -202,3 +202,40 @@ chrome.storage.sync.get(['settings'], (data) => {
   renderFields();
   renderPreview();
 });
+
+const shortcutAPI = globalThis.browser || globalThis.chrome;
+const shortcutDisplay = document.getElementById('inspectorShortcut');
+const shortcutError = document.getElementById('shortcutError');
+
+document.getElementById('extensionVersion').textContent = shortcutAPI.runtime.getManifest().version;
+
+async function refreshShortcut() {
+  try {
+    const commands = await shortcutAPI.commands.getAll();
+    const action = commands.find(command => command.name === '_execute_action');
+    shortcutDisplay.textContent = action?.shortcut || 'Unassigned';
+  } catch {
+    shortcutDisplay.textContent = 'Unavailable';
+  }
+}
+
+document.getElementById('changeShortcut').addEventListener('click', async () => {
+  shortcutError.hidden = true;
+  try {
+    if (shortcutAPI.commands.openShortcutSettings) {
+      await shortcutAPI.commands.openShortcutSettings();
+    } else {
+      await shortcutAPI.tabs.create({ url: 'chrome://extensions/shortcuts' });
+    }
+  } catch {
+    shortcutError.textContent = 'Open your browser’s extension settings and look for keyboard shortcuts.';
+    shortcutError.hidden = false;
+  }
+});
+
+window.addEventListener('focus', refreshShortcut);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshShortcut();
+});
+shortcutAPI.commands.onChanged?.addListener(refreshShortcut);
+refreshShortcut();
